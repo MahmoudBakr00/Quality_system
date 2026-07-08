@@ -234,27 +234,36 @@ async function loadDefects() {
   const tbody = document.getElementById('tbody');
   tbody.innerHTML = `<tr><td colspan="9" class="loading">⏳ جاري التحميل...</td></tr>`;
 
-  let query = sbClient.from('defects').select('*, stages(name)').order('created_at', { ascending: false });
-
   const stageId = document.getElementById('filterStage').value;
   const status = document.getElementById('filterStatus').value;
   const search = document.getElementById('filterSerial').value.trim();
   const defectTypeSearch = document.getElementById('filterDefectType').value.trim();
 
+  let query = sbClient.from('defects').select('*, stages(name)').order('created_at', { ascending: false });
   if (stageId) query = query.eq('stage_id', stageId);
   if (status) query = query.eq('status', status);
   if (search) query = query.or(`serial_number.ilike.%${search}%,job_order.ilike.%${search}%`);
   if (defectTypeSearch) query = query.ilike('defect_type_name', `%${defectTypeSearch}%`);
 
-  const { data, error } = await query;
-
-  if (error) {
-    tbody.innerHTML = `<tr><td colspan="9" class="loading">❌ فشل التحميل: ${error.message}</td></tr>`;
-    console.error(error);
-    return;
+  try {
+    const { data, error } = await query;
+    if (error) throw error;
+    allDefects = data || [];
+  } catch (err) {
+    // مفيش نت - استخدم النسخة المحفوظة محليًا وفلترها بنفسنا بنفس معايير الفلتر
+    let cached = getCachedAllDefects();
+    if (stageId) cached = cached.filter(d => d.stage_id === stageId);
+    if (status) cached = cached.filter(d => d.status === status);
+    if (search) cached = cached.filter(d =>
+      (d.serial_number || '').toLowerCase().includes(search.toLowerCase()) ||
+      (d.job_order || '').toLowerCase().includes(search.toLowerCase())
+    );
+    if (defectTypeSearch) cached = cached.filter(d =>
+      (d.defect_type_name || '').toLowerCase().includes(defectTypeSearch.toLowerCase())
+    );
+    allDefects = cached;
   }
 
-  allDefects = data || [];
   renderTable();
 }
 
