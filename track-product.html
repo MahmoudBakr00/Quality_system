@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>تتبع منتج - نظام تسجيل العيوب</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+body { background: #0f172a; padding: 20px; color: #f1f5f9; }
+.container { max-width: 700px; margin: 0 auto; }
+.sub-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; background: #1e293b; padding: 14px 20px; border-radius: 12px; }
+.back-link { color: #93c5fd; text-decoration: none; font-weight: 600; font-size: 14px; }
+.back-link:hover { text-decoration: underline; }
+
+.view { background: #1e293b; border-radius: 16px; padding: 28px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); margin-bottom: 20px; }
+.view h1 { text-align: center; color: #60a5fa; margin-bottom: 24px; font-size: 22px; }
+
+.scan-row { display: flex; gap: 10px; margin-bottom: 10px; }
+.scan-row input { flex: 1; padding: 12px 14px; border: none; border-radius: 8px; background: #334155; color: #f1f5f9; font-size: 15px; }
+.scan-row input:focus { outline: 2px solid #3b82f6; }
+.scan-btn { background: #8b5cf6; color: white; border: none; padding: 0 18px; border-radius: 8px; cursor: pointer; font-weight: bold; white-space: nowrap; }
+.scan-btn:hover { background: #7c3aed; }
+.search-btn { width: 100%; padding: 12px; background: #3b82f6; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 15px; }
+.search-btn:hover { background: #2563eb; }
+
+#scannerModal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 100; align-items: center; justify-content: center; }
+#scannerModal.open { display: flex; }
+.scanner-box { background: #1e293b; border-radius: 14px; padding: 20px; width: 90%; max-width: 400px; }
+.scanner-box h3 { color: #60a5fa; margin-bottom: 14px; text-align: center; }
+#scannerContainer { width: 100%; border-radius: 10px; overflow: hidden; }
+.scanner-close { width: 100%; margin-top: 14px; padding: 10px; background: #64748b; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
+
+.result-panel { background: #1e293b; border-radius: 14px; padding: 24px; }
+.result-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
+.result-header h2 { color: #60a5fa; font-size: 18px; }
+.job-order-badge { background: #334155; color: #fbbf24; padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: bold; }
+
+.timeline-item { background: #334155; border-radius: 10px; padding: 14px 18px; margin-bottom: 10px; border-right: 3px solid #64748b; }
+.timeline-item.pending { border-right-color: #fbbf24; }
+.timeline-item.approved { border-right-color: #22c55e; }
+.timeline-item.rejected { border-right-color: #ef4444; }
+.timeline-item .top-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 6px; }
+.timeline-item .stage-name { font-weight: bold; color: #f1f5f9; }
+.timeline-item .status-badge { font-size: 11px; padding: 3px 10px; border-radius: 12px; font-weight: bold; }
+.status-badge.pending { background: #fbbf24; color: #78350f; }
+.status-badge.approved { background: #22c55e; color: white; }
+.status-badge.rejected { background: #ef4444; color: white; }
+.timeline-item .defect-type { color: #93c5fd; font-size: 13px; margin-bottom: 4px; }
+.timeline-item .desc { color: #cbd5e1; font-size: 13px; margin-bottom: 6px; }
+.timeline-item .meta { color: #64748b; font-size: 11px; }
+
+.empty-note { color: #64748b; text-align: center; padding: 30px; }
+</style>
+</head>
+<body>
+<div class="container">
+<div class="sub-header">
+<a href="home.html" class="back-link">⬅ الرئيسية</a>
+<span id="userEmail" style="color:#94a3b8; font-size:13px;"></span>
+</div>
+
+<div class="view">
+<h1>📦 تتبع منتج</h1>
+<div class="scan-row">
+  <input type="text" id="serialInput" placeholder="اكتب السيريال أو استخدم السكانر" />
+  <button type="button" class="scan-btn" id="openScannerBtn">📷 سكان</button>
+</div>
+<button class="search-btn" id="searchBtn">🔍 بحث</button>
+</div>
+
+<div class="result-panel" id="resultPanel" style="display:none;">
+<div class="result-header">
+  <h2 id="resultSerial">-</h2>
+  <span class="job-order-badge" id="resultJobOrder">-</span>
+</div>
+<div id="timelineContainer"></div>
+</div>
+</div>
+
+<div id="scannerModal">
+<div class="scanner-box">
+<h3>📷 وجّه الكاميرا نحو الباركود</h3>
+<div id="scannerContainer"></div>
+<button class="scanner-close" id="closeScannerBtn">إغلاق</button>
+</div>
+</div>
+
+<script src="shared.js"></script>
+<script>
+let currentScanner = null;
+
+async function init() {
+  const auth = await requireAuth();
+  if (!auth) return;
+  document.getElementById('userEmail').textContent = auth.user.email;
+}
+init();
+
+const scannerModal = document.getElementById('scannerModal');
+document.getElementById('openScannerBtn').addEventListener('click', () => {
+  scannerModal.classList.add('open');
+  currentScanner = startBarcodeScanner('scannerContainer', (decodedText) => {
+    document.getElementById('serialInput').value = decodedText;
+    closeScannerModal();
+    searchProduct();
+  }, (err) => console.error('Scanner error:', err));
+});
+
+async function closeScannerModal() {
+  scannerModal.classList.remove('open');
+  if (currentScanner) { await currentScanner.stop(); currentScanner = null; }
+}
+document.getElementById('closeScannerBtn').addEventListener('click', closeScannerModal);
+
+document.getElementById('searchBtn').addEventListener('click', searchProduct);
+document.getElementById('serialInput').addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') searchProduct();
+});
+
+async function searchProduct() {
+  const serial = document.getElementById('serialInput').value.trim();
+  if (!serial) return;
+
+  const resultPanel = document.getElementById('resultPanel');
+  const timelineContainer = document.getElementById('timelineContainer');
+  resultPanel.style.display = 'block';
+  timelineContainer.innerHTML = '<div class="empty-note">⏳ جاري البحث...</div>';
+
+  document.getElementById('resultSerial').textContent = '🔢 ' + serial;
+  document.getElementById('resultJobOrder').textContent = 'جوب أوردر: ' + (extractJobOrder(serial) || '-');
+
+  const { data, error } = await sbClient
+    .from('defects')
+    .select('*, stages(name)')
+    .eq('serial_number', serial)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    timelineContainer.innerHTML = '<div class="empty-note">❌ حدث خطأ أثناء البحث</div>';
+    console.error(error);
+    return;
+  }
+
+  if (!data || data.length === 0) {
+    timelineContainer.innerHTML = '<div class="empty-note">✅ لا توجد عيوب مسجلة على هذا المنتج في أي محطة</div>';
+    return;
+  }
+
+  const statusText = { pending: 'قيد المراجعة', approved: 'معتمد', rejected: 'مرفوض' };
+  timelineContainer.innerHTML = '';
+  data.forEach(d => {
+    const div = document.createElement('div');
+    div.className = 'timeline-item ' + d.status;
+    div.innerHTML = `
+      <div class="top-row">
+        <span class="stage-name">🏭 ${d.stages ? d.stages.name : '-'}</span>
+        <span class="status-badge ${d.status}">${statusText[d.status] || d.status}</span>
+      </div>
+      ${d.defect_type_name ? `<div class="defect-type">نوع العيب: ${d.defect_type_name}</div>` : ''}
+      ${d.description ? `<div class="desc">${d.description}</div>` : ''}
+      <div class="meta">سجّله: ${d.technician_email || '-'} | ${formatDate(d.created_at)}</div>
+      ${d.reviewed_by_email ? `<div class="meta">راجعه: ${d.reviewed_by_email} | ${formatDate(d.reviewed_at)}</div>` : ''}
+    `;
+    timelineContainer.appendChild(div);
+  });
+}
+</script>
+</body>
+</html>

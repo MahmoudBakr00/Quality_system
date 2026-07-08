@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>الداشبورد - نظام تسجيل العيوب</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+body { background: #0f172a; padding: 20px; color: #f1f5f9; }
+.container { max-width: 1300px; margin: 0 auto; }
+.header { display: flex; justify-content: space-between; align-items: center; background: #1e293b; padding: 16px 24px; border-radius: 14px; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
+.header h1 { color: #60a5fa; font-size: 20px; }
+.nav-links { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.nav-links a, .nav-links button.link-btn { color: #93c5fd; text-decoration: none; background: #334155; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; border: none; cursor: pointer; }
+.nav-links a:hover, .nav-links button.link-btn:hover { background: #475569; }
+.logout-btn { background: #ef4444; color: white; border: none; padding: 8px 20px; border-radius: 8px; font-weight: bold; cursor: pointer; }
+.logout-btn:hover { background: #dc2626; }
+
+.filter-bar { display: flex; gap: 10px; flex-wrap: wrap; background: #1e293b; padding: 14px 20px; border-radius: 12px; margin-bottom: 16px; align-items: center; }
+.filter-bar select, .filter-bar input { padding: 8px 14px; border: none; border-radius: 6px; background: #334155; color: #f1f5f9; font-size: 13px; }
+.filter-bar button { padding: 8px 20px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; background: #3b82f6; color: white; font-size: 13px; }
+.filter-bar button:hover { background: #2563eb; }
+.filter-bar button.reset-btn { background: #64748b; }
+.filter-bar button.reset-btn:hover { background: #475569; }
+.filter-bar button.export-btn { background: #22c55e; }
+.filter-bar button.export-btn:hover { background: #16a34a; }
+.filter-bar button.delete-btn { background: #ef4444; }
+.filter-bar button.delete-btn:hover { background: #dc2626; }
+
+.table-wrapper { overflow-x: auto; background: #1e293b; border-radius: 14px; padding: 10px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 900px; }
+th { background: #334155; color: #94a3b8; padding: 10px 8px; text-align: center; white-space: nowrap; }
+td { padding: 8px; text-align: center; border-bottom: 1px solid #334155; color: #e2e8f0; }
+tr:hover td { background: #2d3a4f; }
+tr.row-clickable { cursor: pointer; }
+.status-badge { font-size: 11px; padding: 3px 10px; border-radius: 12px; font-weight: bold; }
+.status-badge.pending { background: #fbbf24; color: #78350f; }
+.status-badge.approved { background: #22c55e; color: white; }
+.status-badge.rejected { background: #ef4444; color: white; }
+.action-btn { border: none; padding: 5px 10px; border-radius: 6px; cursor: pointer; font-size: 11px; font-weight: bold; margin: 2px; }
+.approve-btn { background: #22c55e; color: white; }
+.approve-btn:hover { background: #16a34a; }
+.reject-btn { background: #ef4444; color: white; }
+.reject-btn:hover { background: #dc2626; }
+.loading, .no-data { text-align: center; padding: 40px; color: #94a3b8; }
+
+.modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); align-items: center; justify-content: center; z-index: 100; padding: 20px; }
+.modal-overlay.open { display: flex; }
+.modal-box { background: #1e293b; border-radius: 14px; padding: 24px; width: 100%; max-width: 550px; max-height: 85vh; overflow-y: auto; }
+.modal-box h3 { color: #60a5fa; margin-bottom: 14px; }
+.modal-close { background: #64748b; color: white; border: none; padding: 8px 20px; border-radius: 8px; cursor: pointer; margin-top: 14px; width: 100%; }
+.modal-close:hover { background: #475569; }
+
+.history-item { background: #334155; padding: 12px 16px; border-radius: 8px; margin-bottom: 8px; }
+.history-item .action { font-weight: bold; font-size: 13px; }
+.history-item .action.created { color: #60a5fa; }
+.history-item .action.approved { color: #4ade80; }
+.history-item .action.rejected { color: #f87171; }
+.history-item .meta { color: #94a3b8; font-size: 12px; margin-top: 4px; }
+
+/* إدارة المحطات */
+.station-form { background: #0f172a; padding: 16px; border-radius: 10px; margin-bottom: 16px; }
+.station-form label { color: #94a3b8; font-size: 12px; display: block; margin: 8px 0 4px; }
+.station-form input[type="text"] { width: 100%; padding: 8px 10px; border: none; border-radius: 6px; background: #334155; color: #f1f5f9; }
+.checkbox-row { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+.supervisor-list { max-height: 120px; overflow-y: auto; background: #1e293b; border-radius: 8px; padding: 8px; }
+.supervisor-list label { display: flex; align-items: center; gap: 6px; color: #e2e8f0; font-size: 13px; padding: 4px 0; }
+.station-item { background: #334155; border-radius: 10px; padding: 12px 16px; margin-bottom: 8px; }
+.station-item .s-title { font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
+.station-item .s-meta { color: #94a3b8; font-size: 12px; margin-top: 4px; }
+.small-btn { background: #3b82f6; color: white; border: none; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 11px; }
+.small-btn:hover { background: #2563eb; }
+.defect-type-tag { display: inline-flex; align-items: center; gap: 4px; background: #1e293b; color: #cbd5e1; padding: 3px 8px; border-radius: 12px; font-size: 11px; margin: 3px 3px 0 0; }
+.defect-type-tag button { background: none; border: none; color: #f87171; cursor: pointer; font-size: 12px; }
+.station-detail { display: none; margin-top: 10px; border-top: 1px solid #475569; padding-top: 10px; }
+.station-detail.open { display: block; }
+</style>
+</head>
+<body>
+<div class="container">
+<div class="header">
+<h1>📊 الداشبورد</h1>
+<div class="nav-links">
+<a href="home.html">🏠 الرئيسية</a>
+<button class="link-btn" id="stationsBtn" style="display:none;">🏭 إدارة المحطات</button>
+<a href="admin-users.html" id="usersLink" style="display:none;">👥 إدارة المستخدمين</a>
+<button class="logout-btn" id="logoutBtn">تسجيل خروج</button>
+</div>
+</div>
+
+<div class="filter-bar">
+<select id="filterStage"><option value="">كل المحطات</option></select>
+<select id="filterStatus">
+  <option value="">كل الحالات</option>
+  <option value="pending">قيد المراجعة</option>
+  <option value="approved">معتمد</option>
+  <option value="rejected">مرفوض</option>
+</select>
+<input type="text" id="filterSerial" placeholder="بحث بالسيريال / الجوب أوردر" />
+<button id="applyFilter">🔍 تصفية</button>
+<button class="reset-btn" id="resetFilter">↺ إعادة تعيين</button>
+<button class="export-btn" id="exportBtn">⬇ تصدير</button>
+<button class="delete-btn" id="deleteSelectedBtn" style="display:none;">🗑 حذف المحدد</button>
+</div>
+
+<div class="table-wrapper">
+<table>
+<thead><tr>
+  <th id="checkboxHeaderCell" style="display:none;"><input type="checkbox" id="selectAllCheckbox" /></th>
+  <th>السيريال</th><th>الجوب أوردر</th><th>المحطة</th><th>نوع العيب</th><th>الحالة</th><th>الفني</th><th>التاريخ</th><th></th>
+</tr></thead>
+<tbody id="tbody"><tr><td colspan="9" class="loading">⏳ جاري التحميل...</td></tr></tbody>
+</table>
+</div>
+</div>
+
+<!-- مودال تفاصيل/تاريخ العيب -->
+<div class="modal-overlay" id="historyModal">
+<div class="modal-box">
+<h3 id="historyTitle">📋 تاريخ العيب</h3>
+<div id="historyBody"></div>
+<button class="modal-close" id="historyClose">إغلاق</button>
+</div>
+</div>
+
+<!-- مودال إدارة المحطات (أدمن فقط) -->
+<div class="modal-overlay" id="stationsModal">
+<div class="modal-box" style="max-width:650px;">
+<h3>🏭 إدارة محطات الفحص</h3>
+
+<div class="station-form">
+<label>اسم المحطة الجديدة</label>
+<input type="text" id="newStageName" placeholder="مثال: محطة القص" />
+<label>رقم الخط (اختياري)</label>
+<input type="text" id="newStageLine" placeholder="مثال: 1" />
+<div class="checkbox-row">
+  <input type="checkbox" id="newStageVisibleAll" checked />
+  <label style="margin:0;">مرئية لكل المشرفين (غير مفعّل = تحدد مشرفين بعينهم)</label>
+</div>
+<div id="newStageSupervisorsWrap" style="display:none;">
+  <label>اختر المشرفين المسؤولين</label>
+  <div class="supervisor-list" id="newStageSupervisorsList"><div style="color:#64748b;font-size:12px;">⏳ جاري تحميل المشرفين...</div></div>
+</div>
+<button class="small-btn" style="margin-top:10px; width:100%; padding:10px;" id="addStageBtn">➕ إضافة المحطة</button>
+</div>
+
+<div id="stationsList"><div class="loading">⏳ جاري التحميل...</div></div>
+<button class="modal-close" id="stationsClose">إغلاق</button>
+</div>
+</div>
+
+<script src="shared.js"></script>
+<script>
+let currentUser = null;
+let currentRole = null;
+let allDefects = [];
+let allSupervisors = [];
+
+async function init() {
+  const auth = await requireAuth();
+  if (!auth) return;
+  currentUser = auth.user;
+  currentRole = auth.role;
+
+  if (currentRole === 'admin') {
+    document.getElementById('stationsBtn').style.display = 'inline-block';
+    document.getElementById('usersLink').style.display = 'inline-block';
+    document.getElementById('checkboxHeaderCell').style.display = 'table-cell';
+    document.getElementById('deleteSelectedBtn').style.display = 'inline-block';
+  }
+
+  loadStagesFilter();
+  loadDefects();
+}
+init();
+
+document.getElementById('logoutBtn').addEventListener('click', logout);
+
+// ============ تحميل فلتر المحطات ============
+async function loadStagesFilter() {
+  const { data } = await sbClient.from('stages').select('id, name').order('name');
+  const select = document.getElementById('filterStage');
+  (data || []).forEach(s => {
+    const o = document.createElement('option');
+    o.value = s.id; o.textContent = s.name;
+    select.appendChild(o);
+  });
+}
+
+// ============ تحميل العيوب ============
+async function loadDefects() {
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = `<tr><td colspan="9" class="loading">⏳ جاري التحميل...</td></tr>`;
+
+  let query = sbClient.from('defects').select('*, stages(name)').order('created_at', { ascending: false });
+
+  const stageId = document.getElementById('filterStage').value;
+  const status = document.getElementById('filterStatus').value;
+  const search = document.getElementById('filterSerial').value.trim();
+
+  if (stageId) query = query.eq('stage_id', stageId);
+  if (status) query = query.eq('status', status);
+  if (search) query = query.or(`serial_number.ilike.%${search}%,job_order.ilike.%${search}%`);
+
+  const { data, error } = await query;
+
+  if (error) {
+    tbody.innerHTML = `<tr><td colspan="9" class="loading">❌ فشل التحميل: ${error.message}</td></tr>`;
+    console.error(error);
+    return;
+  }
+
+  allDefects = data || [];
+  renderTable();
+}
+
+const statusText = { pending: 'قيد المراجعة', approved: 'معتمد', rejected: 'مرفوض' };
+
+function renderTable() {
+  const tbody = document.getElementById('tbody');
+  if (allDefects.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="9" class="no-data">📭 لا توجد عيوب مطابقة</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = '';
+  allDefects.forEach(d => {
+    const tr = document.createElement('tr');
+    tr.className = 'row-clickable';
+    const canReview = currentRole === 'admin' || currentRole === 'supervisor';
+    const showActions = canReview && d.status === 'pending';
+
+    tr.innerHTML = `
+      ${currentRole === 'admin' ? `<td onclick="event.stopPropagation()"><input type="checkbox" class="row-checkbox" data-id="${d.id}" /></td>` : ''}
+      <td>${d.serial_number}</td>
+      <td>${d.job_order || '-'}</td>
+      <td>${d.stages ? d.stages.name : '-'}</td>
+      <td>${d.defect_type_name || '-'}</td>
+      <td><span class="status-badge ${d.status}">${statusText[d.status]}</span></td>
+      <td>${d.technician_email ? d.technician_email.split('@')[0] : '-'}</td>
+      <td style="font-size:11px;">${formatDate(d.created_at)}</td>
+      <td onclick="event.stopPropagation()">
+        ${showActions ? `<button class="action-btn approve-btn" data-id="${d.id}" data-action="approved">✔ اعتماد</button>
+        <button class="action-btn reject-btn" data-id="${d.id}" data-action="rejected">✖ رفض</button>` : ''}
+      </td>
+    `;
+    tr.addEventListener('click', () => openHistoryModal(d));
+    tbody.appendChild(tr);
+  });
+
+  tbody.querySelectorAll('.approve-btn, .reject-btn').forEach(btn => {
+    btn.addEventListener('click', () => reviewDefect(btn.dataset.id, btn.dataset.action));
+  });
+}
+
+async function reviewDefect(defectId, action) {
+  let note = null;
+  if (action === 'rejected') {
+    note = prompt('سبب الرفض (اختياري):') || null;
+  }
+  const { error } = await sbClient.from('defects').update({
+    status: action,
+    reviewed_by: currentUser.id,
+    reviewed_by_email: currentUser.email,
+    reviewed_at: new Date().toISOString(),
+    review_note: note
+  }).eq('id', defectId);
+
+  if (error) {
+    alert('❌ فشل التحديث: ' + error.message);
+    return;
+  }
+  loadDefects();
+}
+
+// ============ فلترة ============
+document.getElementById('applyFilter').addEventListener('click', loadDefects);
+document.getElementById('filterSerial').addEventListener('keypress', (e) => { if (e.key === 'Enter') loadDefects(); });
+document.getElementById('resetFilter').addEventListener('click', () => {
+  document.getElementById('filterStage').value = '';
+  document.getElementById('filterStatus').value = '';
+  document.getElementById('filterSerial').value = '';
+  loadDefects();
+});
+
+// ============ تصدير ============
+document.getElementById('exportBtn').addEventListener('click', () => {
+  const rows = allDefects.map(d => ({
+    السيريال: d.serial_number,
+    الجوب_أوردر: d.job_order || '',
+    المحطة: d.stages ? d.stages.name : '',
+    نوع_العيب: d.defect_type_name || '',
+    الحالة: statusText[d.status],
+    الفني: d.technician_email || '',
+    راجعه: d.reviewed_by_email || '',
+    التاريخ: formatDate(d.created_at),
+  }));
+  exportToCSV('defects_export.csv', rows);
+});
+
+// ============ تحديد الكل وحذف ============
+document.getElementById('selectAllCheckbox')?.addEventListener('change', (e) => {
+  document.querySelectorAll('.row-checkbox').forEach(cb => cb.checked = e.target.checked);
+});
+
+document.getElementById('deleteSelectedBtn').addEventListener('click', async () => {
+  const selected = Array.from(document.querySelectorAll('.row-checkbox:checked')).map(cb => cb.dataset.id);
+  if (selected.length === 0) { alert('اختر عيوب أولاً'); return; }
+  if (!confirm(`هل أنت متأكد من حذف ${selected.length} عيب؟ لا يمكن التراجع.`)) return;
+
+  const { error } = await sbClient.from('defects').delete().in('id', selected);
+  if (error) { alert('❌ فشل الحذف: ' + error.message); return; }
+  loadDefects();
+});
+
+// ============ مودال تاريخ العيب ============
+const historyModal = document.getElementById('historyModal');
+async function openHistoryModal(defect) {
+  document.getElementById('historyTitle').textContent = '📋 تاريخ العيب - ' + defect.serial_number;
+  const body = document.getElementById('historyBody');
+  body.innerHTML = '⏳ جاري التحميل...';
+  historyModal.classList.add('open');
+
+  const { data, error } = await sbClient
+    .from('defect_history')
+    .select('*')
+    .eq('defect_id', defect.id)
+    .order('created_at', { ascending: true });
+
+  if (error || !data || data.length === 0) {
+    body.innerHTML = '<div style="color:#64748b;">لا يوجد سجل تاريخي</div>';
+    return;
+  }
+
+  const actionText = { created: '📝 تم التسجيل', approved: '✔ تم الاعتماد', rejected: '✖ تم الرفض' };
+  body.innerHTML = data.map(h => `
+    <div class="history-item">
+      <div class="action ${h.action}">${actionText[h.action] || h.action}</div>
+      <div class="meta">${h.performed_by_email || '-'} | ${formatDate(h.created_at)}</div>
+      ${h.note ? `<div class="meta">ملاحظة: ${h.note}</div>` : ''}
+    </div>
+  `).join('');
+}
+document.getElementById('historyClose').addEventListener('click', () => historyModal.classList.remove('open'));
+
+// ============ إدارة المحطات (أدمن فقط) ============
+const stationsModal = document.getElementById('stationsModal');
+document.getElementById('stationsBtn').addEventListener('click', () => {
+  stationsModal.classList.add('open');
+  loadSupervisorsList();
+  loadStationsList();
+});
+document.getElementById('stationsClose').addEventListener('click', () => stationsModal.classList.remove('open'));
+
+document.getElementById('newStageVisibleAll').addEventListener('change', (e) => {
+  document.getElementById('newStageSupervisorsWrap').style.display = e.target.checked ? 'none' : 'block';
+});
+
+async function loadSupervisorsList() {
+  const { data, error } = await sbClient.from('profiles').select('id, email').eq('role', 'supervisor').order('email');
+  allSupervisors = data || [];
+  const container = document.getElementById('newStageSupervisorsList');
+  if (!allSupervisors.length) {
+    container.innerHTML = '<div style="color:#64748b;font-size:12px;">لا يوجد مشرفين مسجلين بعد</div>';
+    return;
+  }
+  container.innerHTML = allSupervisors.map(s => `
+    <label><input type="checkbox" class="new-stage-supervisor-cb" value="${s.id}" /> ${s.email}</label>
+  `).join('');
+}
+
+document.getElementById('addStageBtn').addEventListener('click', async () => {
+  const name = document.getElementById('newStageName').value.trim();
+  const line = document.getElementById('newStageLine').value.trim() || null;
+  const visibleAll = document.getElementById('newStageVisibleAll').checked;
+
+  if (!name) { alert('⚠️ اكتب اسم المحطة'); return; }
+
+  try {
+    const { data: stage, error } = await sbClient.from('stages').insert([{
+      name, line_no: line, visible_to_all: visibleAll, created_by: currentUser.id
+    }]).select().single();
+    if (error) throw error;
+
+    if (!visibleAll) {
+      const selectedIds = Array.from(document.querySelectorAll('.new-stage-supervisor-cb:checked')).map(cb => cb.value);
+      if (selectedIds.length > 0) {
+        const rows = selectedIds.map(sid => ({ supervisor_id: sid, stage_id: stage.id }));
+        await sbClient.from('station_supervisors').insert(rows);
+      }
+    }
+
+    document.getElementById('newStageName').value = '';
+    document.getElementById('newStageLine').value = '';
+    document.getElementById('newStageVisibleAll').checked = true;
+    document.getElementById('newStageSupervisorsWrap').style.display = 'none';
+
+    loadStationsList();
+    loadStagesFilter();
+    alert('✅ تمت إضافة المحطة بنجاح');
+  } catch (err) {
+    alert('❌ فشل الإضافة: ' + err.message);
+  }
+});
+
+async function loadStationsList() {
+  const container = document.getElementById('stationsList');
+  container.innerHTML = '<div class="loading">⏳ جاري التحميل...</div>';
+
+  const { data: stages, error } = await sbClient.from('stages').select('*').order('created_at', { ascending: false });
+  if (error || !stages || stages.length === 0) {
+    container.innerHTML = '<div class="loading">📭 لا توجد محطات مضافة بعد</div>';
+    return;
+  }
+
+  const { data: assignments } = await sbClient.from('station_supervisors').select('stage_id, supervisor_id, profiles(email)');
+  const { data: defectTypes } = await sbClient.from('defect_types').select('*');
+
+  container.innerHTML = '';
+  stages.forEach(s => {
+    const stageSupervisors = (assignments || []).filter(a => a.stage_id === s.id);
+    const stageDefectTypes = (defectTypes || []).filter(dt => dt.stage_id === s.id);
+
+    const div = document.createElement('div');
+    div.className = 'station-item';
+    div.innerHTML = `
+      <div class="s-title">
+        <span>🏭 ${s.name} ${s.line_no ? '(خط ' + s.line_no + ')' : ''}</span>
+        <button class="small-btn manage-station-btn" data-id="${s.id}">إدارة</button>
+      </div>
+      <div class="s-meta">${s.visible_to_all ? '👁 مرئية لكل المشرفين' : '🔒 مشرفين محددين: ' + (stageSupervisors.map(a => a.profiles?.email).join(', ') || 'لا يوجد')}</div>
+      <div class="station-detail" id="detail-${s.id}">
+        <label style="color:#94a3b8;font-size:12px;">أنواع العيوب في هذه المحطة:</label>
+        <div id="defect-types-${s.id}">
+          ${stageDefectTypes.map(dt => `<span class="defect-type-tag">${dt.name} <button data-dt-id="${dt.id}" class="remove-dt-btn">×</button></span>`).join('') || '<span style="color:#64748b;font-size:12px;">لا يوجد</span>'}
+        </div>
+        <div style="display:flex; gap:6px; margin-top:8px;">
+          <input type="text" placeholder="نوع عيب جديد" class="new-dt-input" style="flex:1; padding:6px 10px; border:none; border-radius:6px; background:#334155; color:#f1f5f9; font-size:12px;" />
+          <button class="small-btn add-dt-btn" data-stage-id="${s.id}">➕</button>
+        </div>
+      </div>
+    `;
+    container.appendChild(div);
+  });
+
+  container.querySelectorAll('.manage-station-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.getElementById('detail-' + btn.dataset.id).classList.toggle('open');
+    });
+  });
+
+  container.querySelectorAll('.add-dt-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const input = btn.parentElement.querySelector('.new-dt-input');
+      const name = input.value.trim();
+      if (!name) return;
+      const { error } = await sbClient.from('defect_types').insert([{ stage_id: btn.dataset.stageId, name }]);
+      if (error) { alert('❌ ' + error.message); return; }
+      loadStationsList();
+    });
+  });
+
+  container.querySelectorAll('.remove-dt-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      await sbClient.from('defect_types').delete().eq('id', btn.dataset.dtId);
+      loadStationsList();
+    });
+  });
+}
+</script>
+</body>
+</html>

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>تسجيل الدخول - نظام فحص الصاج</title>
+<title>تسجيل الدخول - نظام تسجيل العيوب</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
@@ -11,19 +11,17 @@ body { background: #0f172a; display: flex; justify-content: center; align-items:
 .login-container { background: #1e293b; padding: 40px; border-radius: 16px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); width: 100%; max-width: 400px; }
 .login-container h2 { color: #f8fafc; text-align: center; margin-bottom: 24px; font-size: 26px; }
 .login-container label { color: #cbd5e1; display: block; margin-bottom: 6px; font-weight: 600; }
-.login-container input, .login-container select { width: 100%; padding: 12px 16px; margin-bottom: 20px; border: none; border-radius: 8px; background: #334155; color: #f1f5f9; font-size: 16px; transition: 0.3s; }
-.login-container input:focus, .login-container select:focus { outline: 2px solid #3b82f6; background: #1e293b; }
-.login-container button[type="submit"] { width: 100%; padding: 14px; background: #3b82f6; color: white; border: none; border-radius: 8px; font-size: 18px; font-weight: bold; cursor: pointer; transition: 0.3s; }
-.login-container button[type="submit"]:hover { background: #2563eb; transform: scale(1.02); }
+.login-container input, .login-container select { width: 100%; padding: 12px 16px; margin-bottom: 20px; border: none; border-radius: 8px; background: #334155; color: #f1f5f9; font-size: 16px; }
+.login-container input:focus, .login-container select:focus { outline: 2px solid #3b82f6; }
+.login-container button[type="submit"] { width: 100%; padding: 14px; background: #3b82f6; color: white; border: none; border-radius: 8px; font-size: 18px; font-weight: bold; cursor: pointer; }
+.login-container button[type="submit"]:hover { background: #2563eb; }
 .login-container button:disabled { opacity: 0.6; cursor: not-allowed; }
 .error-msg { color: #f87171; text-align: center; margin-top: 12px; font-size: 14px; }
 .success-msg { color: #4ade80; text-align: center; margin-top: 12px; font-size: 14px; }
 .footer { text-align: center; color: #475569; margin-top: 20px; font-size: 12px; }
-
 .tabs { display: flex; background: #0f172a; border-radius: 10px; padding: 4px; margin-bottom: 24px; }
-.tabs button { flex: 1; padding: 10px; border: none; border-radius: 8px; background: transparent; color: #94a3b8; font-weight: bold; font-size: 14px; cursor: pointer; transition: 0.2s; }
+.tabs button { flex: 1; padding: 10px; border: none; border-radius: 8px; background: transparent; color: #94a3b8; font-weight: bold; font-size: 14px; cursor: pointer; }
 .tabs button.active { background: #3b82f6; color: white; }
-
 .hint-small { color: #64748b; font-size: 12px; margin: -14px 0 16px; }
 </style>
 </head>
@@ -36,7 +34,6 @@ body { background: #0f172a; display: flex; justify-content: center; align-items:
   <button type="button" id="tabRegister">تسجيل حساب جديد</button>
 </div>
 
-<!-- فورم الدخول -->
 <form id="loginForm">
 <label>البريد الإلكتروني</label>
 <input type="email" id="email" placeholder="example@company.com" required />
@@ -46,7 +43,6 @@ body { background: #0f172a; display: flex; justify-content: center; align-items:
 <div id="errorMsg" class="error-msg"></div>
 </form>
 
-<!-- فورم التسجيل -->
 <form id="registerForm" style="display:none;">
 <label>البريد الإلكتروني</label>
 <input type="email" id="regEmail" placeholder="example@company.com" required />
@@ -57,17 +53,17 @@ body { background: #0f172a; display: flex; justify-content: center; align-items:
   <option value="technician">فني</option>
   <option value="admin">أدمن</option>
 </select>
+<div class="hint-small">حسابات المشرفين (Supervisor) تُنشأ فقط من لوحة تحكم الأدمن.</div>
 <div id="adminCodeWrap" style="display:none;">
   <label>كود تفعيل الأدمن</label>
   <input type="password" id="adminCode" placeholder="أدخل كود الأدمن السري" />
-  <div class="hint-small">هذا الكود يُعطى فقط للمخوّلين بإنشاء حسابات أدمن.</div>
 </div>
 <button type="submit" id="registerBtn">إنشاء الحساب</button>
 <div id="regErrorMsg" class="error-msg"></div>
 <div id="regSuccessMsg" class="success-msg"></div>
 </form>
 
-<div class="footer">نظام إدارة فحص الصاج - نسخة Supabase</div>
+<div class="footer">نظام تسجيل ومتابعة العيوب</div>
 </div>
 
 <script>
@@ -76,27 +72,13 @@ const SUPABASE_ANON_KEY = "sb_publishable_2Vw18qr3DeAt7Ge7onvXLA_Gr02sm2e";
 const client = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // ⚠️ غيّر الكود ده لكود خاص بيك قبل الاستخدام الفعلي
-// ملحوظة: هذا الكود ظاهر في الـ JS العام، فهو عائق بسيط مش حماية حقيقية 100%
 const ADMIN_SIGNUP_CODE = "CHANGE_ME_1234";
 
-// التحقق من وجود جلسة نشطة
 async function checkSession() {
   try {
     const { data: { session } } = await client.auth.getSession();
     if (session) {
-      const { data: profile } = await client
-        .from('profiles')
-        .select('role')
-        .eq('id', session.user.id)
-        .single();
-
-      if (profile) {
-        if (profile.role === 'admin') {
-          window.location.href = 'admin.html';
-        } else if (profile.role === 'technician') {
-          window.location.href = 'technician.html';
-        }
-      }
+      window.location.href = 'home.html';
     }
   } catch (error) {
     console.error('Session check error:', error);
@@ -104,7 +86,6 @@ async function checkSession() {
 }
 checkSession();
 
-// ============ تبويبات دخول / تسجيل ============
 const tabLogin = document.getElementById('tabLogin');
 const tabRegister = document.getElementById('tabRegister');
 const loginForm = document.getElementById('loginForm');
@@ -131,7 +112,6 @@ document.getElementById('regRole').addEventListener('change', (e) => {
   document.getElementById('adminCodeWrap').style.display = e.target.value === 'admin' ? 'block' : 'none';
 });
 
-// ============ تسجيل الدخول ============
 document.getElementById('loginForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const email = document.getElementById('email').value.trim();
@@ -144,34 +124,15 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
 
   try {
     const { data, error } = await client.auth.signInWithPassword({ email, password });
-
-    if (error) {
-      errorMsg.textContent = '❌ ' + error.message;
-      return;
-    }
-    if (!data || !data.user) {
-      errorMsg.textContent = '❌ لم يتم العثور على المستخدم';
-      return;
-    }
+    if (error) { errorMsg.textContent = '❌ ' + error.message; return; }
+    if (!data || !data.user) { errorMsg.textContent = '❌ لم يتم العثور على المستخدم'; return; }
 
     const { data: profile, error: profileError } = await client
-      .from('profiles')
-      .select('role')
-      .eq('id', data.user.id)
-      .single();
+      .from('profiles').select('role').eq('id', data.user.id).single();
 
-    if (profileError || !profile) {
-      errorMsg.textContent = '⚠️ لم يتم العثور على بيانات المستخدم';
-      return;
-    }
+    if (profileError || !profile) { errorMsg.textContent = '⚠️ لم يتم العثور على بيانات المستخدم'; return; }
 
-    if (profile.role === 'technician') {
-      window.location.href = 'technician.html';
-    } else if (profile.role === 'admin') {
-      window.location.href = 'admin.html';
-    } else {
-      errorMsg.textContent = '⚠️ دور غير معروف: ' + profile.role;
-    }
+    window.location.href = 'home.html';
   } catch (error) {
     errorMsg.textContent = '❌ حدث خطأ: ' + error.message;
     console.error('Login error:', error);
@@ -181,7 +142,6 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
   }
 });
 
-// ============ التسجيل الذاتي ============
 registerForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const email = document.getElementById('regEmail').value.trim();
@@ -205,17 +165,13 @@ registerForm.addEventListener('submit', async (e) => {
 
   try {
     const { data, error } = await client.auth.signUp({
-      email,
-      password,
-      options: { data: { role } }
+      email, password, options: { data: { role } }
     });
-
     if (error) throw error;
 
     regSuccessMsg.textContent = '✅ تم إنشاء الحساب بنجاح! يمكنك الآن تسجيل الدخول.';
     registerForm.reset();
     document.getElementById('adminCodeWrap').style.display = 'none';
-
     setTimeout(() => { tabLogin.click(); }, 1500);
   } catch (err) {
     regErrorMsg.textContent = '❌ ' + err.message;
