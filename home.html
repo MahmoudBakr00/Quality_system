@@ -86,6 +86,9 @@ async function checkAuth() {
 
   document.getElementById('userEmail').textContent = user.email;
   document.getElementById('roleBadge').textContent = getRoleName(profile.role) || profile.role;
+
+  // مزامنة كل البيانات في الخلفية (لو فيه نت) عشان تفضل محدّثة للعمل بدون نت لاحقًا
+  syncAllDataForOffline();
 }
 checkAuth();
 
