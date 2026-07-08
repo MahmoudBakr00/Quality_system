@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>تسجيل الدخول - نظام تسجيل العيوب</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="shared.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
 body { background: #0f172a; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
@@ -27,69 +28,71 @@ body { background: #0f172a; display: flex; justify-content: center; align-items:
 </head>
 <body>
 <div class="login-container">
-<h2 id="mainTitle">🔐 تسجيل الدخول</h2>
+<h2 id="mainTitle" data-i18n="login">🔐 تسجيل الدخول</h2>
 
 <div class="tabs">
-  <button type="button" id="tabLogin" class="active">دخول</button>
-  <button type="button" id="tabRegister">تسجيل حساب جديد</button>
+  <button type="button" id="tabLogin" class="active" data-i18n="login_tab">دخول</button>
+  <button type="button" id="tabRegister" data-i18n="register_tab">تسجيل حساب جديد</button>
 </div>
 
 <form id="loginForm">
-<label>البريد الإلكتروني</label>
+<label data-i18n="email_label">البريد الإلكتروني</label>
 <input type="email" id="email" placeholder="example@company.com" required />
-<label>كلمة المرور</label>
+<label data-i18n="password_label">كلمة المرور</label>
 <input type="password" id="password" placeholder="••••••••" required />
-<button type="submit" id="loginBtn">دخول</button>
+<button type="submit" id="loginBtn" data-i18n="login_btn">دخول</button>
 <div id="errorMsg" class="error-msg"></div>
 </form>
 
 <div id="forgotSection" style="margin-top:6px;">
-<a href="#" id="forgotLink" style="color:#93c5fd; font-size:13px; text-decoration:none; display:block; text-align:center;">نسيت كلمة المرور؟</a>
+<a href="#" id="forgotLink" data-i18n="forgot_password" style="color:#93c5fd; font-size:13px; text-decoration:none; display:block; text-align:center;">نسيت كلمة المرور؟</a>
 </div>
 
 <form id="forgotForm" style="display:none; margin-top:10px;">
-<label>البريد الإلكتروني</label>
+<label data-i18n="email_label">البريد الإلكتروني</label>
 <input type="email" id="forgotEmail" placeholder="example@company.com" required />
-<button type="submit" id="forgotBtn">📩 إرسال رابط إعادة التعيين</button>
+<button type="submit" id="forgotBtn" data-i18n="send_reset_link">📩 إرسال رابط إعادة التعيين</button>
 <div id="forgotErrorMsg" class="error-msg"></div>
 <div id="forgotSuccessMsg" class="success-msg"></div>
-<a href="#" id="cancelForgot" style="color:#94a3b8; font-size:12px; text-decoration:none; display:block; text-align:center; margin-top:10px;">إلغاء والرجوع لتسجيل الدخول</a>
+<a href="#" id="cancelForgot" data-i18n="cancel_back_login" style="color:#94a3b8; font-size:12px; text-decoration:none; display:block; text-align:center; margin-top:10px;">إلغاء والرجوع لتسجيل الدخول</a>
 </form>
 
 <form id="registerForm" style="display:none;">
-<label>البريد الإلكتروني</label>
+<label data-i18n="email_label">البريد الإلكتروني</label>
 <input type="email" id="regEmail" placeholder="example@company.com" required />
-<label>كلمة المرور</label>
+<label data-i18n="password_label">كلمة المرور</label>
 <input type="password" id="regPassword" placeholder="••••••••" minlength="6" required />
-<label>الدور</label>
+<label data-i18n="role_label">الدور</label>
 <select id="regRole">
-  <option value="technician">فني</option>
-  <option value="admin">أدمن</option>
+  <option value="technician" data-i18n="role_technician">فني</option>
+  <option value="admin" data-i18n="role_admin">أدمن</option>
 </select>
-<div class="hint-small">حسابات المشرفين (Supervisor) تُنشأ فقط من لوحة تحكم الأدمن.</div>
+<div class="hint-small" data-i18n="supervisor_hint">حسابات المشرفين (Supervisor) تُنشأ فقط من لوحة تحكم الأدمن.</div>
 <div id="adminCodeWrap" style="display:none;">
-  <label>كود تفعيل الأدمن</label>
+  <label data-i18n="admin_code_label">كود تفعيل الأدمن</label>
   <input type="password" id="adminCode" placeholder="أدخل كود الأدمن السري" />
 </div>
-<button type="submit" id="registerBtn">إنشاء الحساب</button>
+<button type="submit" id="registerBtn" data-i18n="create_account_btn">إنشاء الحساب</button>
 <div id="regErrorMsg" class="error-msg"></div>
 <div id="regSuccessMsg" class="success-msg"></div>
 </form>
 
-<div class="footer">نظام تسجيل ومتابعة العيوب</div>
+<div class="footer" data-i18n="footer_text">نظام تسجيل ومتابعة العيوب</div>
+<div style="text-align:center; margin-top:10px;" id="langToggleWrap"></div>
 </div>
 
 <script>
-const SUPABASE_URL = "https://igdfaqiaprhgsdrqcxfj.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_2Vw18qr3DeAt7Ge7onvXLA_Gr02sm2e";
-const client = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// ملحوظة: SUPABASE_URL/SUPABASE_ANON_KEY/sbClient معرّفين بالفعل في shared.js
+// اللي بيتم تحميله قبل هذا الـ script
 
 // ⚠️ غيّر الكود ده لكود خاص بيك قبل الاستخدام الفعلي
 const ADMIN_SIGNUP_CODE = "CHANGE_ME_1234";
 
 async function checkSession() {
   try {
-    const { data: { session } } = await client.auth.getSession();
+    applyTranslations();
+    renderLangToggle('langToggleWrap');
+    const { data: { session } } = await sbClient.auth.getSession();
     if (session) {
       window.location.href = 'home.html';
     }
@@ -112,7 +115,7 @@ tabLogin.addEventListener('click', () => {
   registerForm.style.display = 'none';
   document.getElementById('forgotSection').style.display = 'block';
   document.getElementById('forgotForm').style.display = 'none';
-  mainTitle.textContent = '🔐 تسجيل الدخول';
+  mainTitle.textContent = t('login');
 });
 
 tabRegister.addEventListener('click', () => {
@@ -122,7 +125,7 @@ tabRegister.addEventListener('click', () => {
   loginForm.style.display = 'none';
   document.getElementById('forgotSection').style.display = 'none';
   document.getElementById('forgotForm').style.display = 'none';
-  mainTitle.textContent = '📝 إنشاء حساب جديد';
+  mainTitle.textContent = '📝 ' + (getLang() === 'ar' ? 'إنشاء حساب جديد' : 'Create New Account');
 });
 
 // ============ نسيت كلمة المرور ============
@@ -135,7 +138,7 @@ forgotLink.addEventListener('click', (e) => {
   loginForm.style.display = 'none';
   forgotSection.style.display = 'none';
   forgotForm.style.display = 'block';
-  mainTitle.textContent = '🔑 إعادة تعيين كلمة المرور';
+  mainTitle.textContent = t('reset_password_title');
 });
 
 document.getElementById('cancelForgot').addEventListener('click', (e) => {
@@ -143,7 +146,7 @@ document.getElementById('cancelForgot').addEventListener('click', (e) => {
   forgotForm.style.display = 'none';
   forgotSection.style.display = 'block';
   loginForm.style.display = 'block';
-  mainTitle.textContent = '🔐 تسجيل الدخول';
+  mainTitle.textContent = t('login');
 });
 
 forgotForm.addEventListener('submit', async (e) => {
@@ -159,7 +162,7 @@ forgotForm.addEventListener('submit', async (e) => {
 
   try {
     const redirectUrl = window.location.origin + window.location.pathname.replace('index.html', '') + 'reset-password.html';
-    const { error } = await client.auth.resetPasswordForEmail(email, { redirectTo: redirectUrl });
+    const { error } = await sbClient.auth.resetPasswordForEmail(email, { redirectTo: redirectUrl });
     if (error) throw error;
     // ملحوظة: لا نكشف هل الإيميل موجود في القاعدة أو لا (لأسباب أمنية)، الرسالة عامة دائمًا
     successMsg.textContent = '✅ لو الإيميل ده مسجل عندنا، هيوصله رابط لإعادة تعيين كلمة المرور خلال دقائق.';
@@ -187,7 +190,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
   btn.textContent = '⏳ جاري الدخول...';
 
   try {
-    const { data, error } = await client.auth.signInWithPassword({ email, password });
+    const { data, error } = await sbClient.auth.signInWithPassword({ email, password });
     if (error) { errorMsg.textContent = '❌ ' + error.message; return; }
     if (!data || !data.user) { errorMsg.textContent = '❌ لم يتم العثور على المستخدم'; return; }
 
@@ -228,7 +231,7 @@ registerForm.addEventListener('submit', async (e) => {
   btn.textContent = '⏳ جاري إنشاء الحساب...';
 
   try {
-    const { data, error } = await client.auth.signUp({
+    const { data, error } = await sbClient.auth.signUp({
       email, password, options: { data: { role } }
     });
     if (error) throw error;
