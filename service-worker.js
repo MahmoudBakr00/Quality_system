@@ -1,13 +1,13 @@
 // =========================================================
-// Service Worker - نظام تسجيل ومتابعة العيوب
-// الهدف: تخزين "هيكل الموقع" (الصفحات + المكتبات) بشكل موثوق
-// عشان يشتغل حتى لو النت اتقطع تمامًا بعد أول زيارة ناجحة.
-// ملحوظة: طلبات Supabase (البيانات الحقيقية) بتتجاهل هنا عمدًا
-// وبتروح للنت مباشرة - التعامل مع انقطاعها بيتم في shared.js
-// (نظام الطابور المحلي)، مش هنا.
+// Service Worker - نظام تسجيل ومتابعة العيوب (نسخة مصححة v2)
+// الاستراتيجية:
+// - صفحات HTML و shared.js: Network-First (يفضل ياخد أحدث نسخة أونلاين،
+//   ويرجع للكاش بس لو مفيش نت خالص) - عشان أي تحديث بترفعه يظهر فورًا.
+// - مكتبات CDN (نادرًا ما تتغير): Cache-First - أسرع، وشغالة أوفلاين.
+// - طلبات Supabase (بيانات حية): بتتجاهل تمامًا، بتروح للنت مباشرة.
 // =========================================================
 
-const CACHE_NAME = 'defect-system-cache-v1';
+const CACHE_NAME = 'defect-system-cache-v2';
 
 const PRECACHE_URLS = [
   './',
@@ -21,6 +21,9 @@ const PRECACHE_URLS = [
   'reset-password.html',
   'shared.js',
   'manifest.json',
+];
+
+const CDN_LIBRARY_URLS = [
   'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js',
   'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js',
   'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',
@@ -28,11 +31,11 @@ const PRECACHE_URLS = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(PRECACHE_URLS))
-      .catch((err) => {
+    caches.open(CACHE_NAME).then((cache) =>
+      cache.addAll([...PRECACHE_URLS, ...CDN_LIBRARY_URLS]).catch((err) => {
         console.warn('Service worker: بعض الملفات فشل تخزينها مسبقًا', err);
       })
+    )
   );
   self.skipWaiting();
 });
@@ -46,33 +49,58 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+function isCdnLibrary(url) {
+  return CDN_LIBRARY_URLS.some((u) => url.startsWith(u));
+}
+
 self.addEventListener('fetch', (event) => {
   const url = event.request.url;
 
-  // طلبات Supabase (بيانات حية) - سيبها تروح للنت مباشرة، منتدخلش فيها خالص
+  // طلبات Supabase (بيانات حية) - لا تتدخل خالص، سيبها تروح للنت مباشرة
   if (url.includes('supabase.co')) {
     return;
   }
 
-  // باقي الطلبات (صفحات الموقع + المكتبات): جرب الكاش الأول، وحدّثه من النت لو متاح
-  event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      const networkFetch = fetch(event.request)
-        .then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            const clone = networkResponse.clone();
+  // مكتبات CDN: Cache-First (نادرًا ما تتغير، والأهم إنها تشتغل أوفلاين)
+  if (isCdnLibrary(url)) {
+    event.respondWith(
+      (async () => {
+        const cached = await caches.match(event.request);
+        if (cached) return cached;
+        try {
+          const response = await fetch(event.request);
+          if (response && response.status === 200) {
+            const clone = response.clone();
             caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
           }
-          return networkResponse;
-        })
-        .catch(() => null);
+          return response;
+        } catch (err) {
+          return new Response('', { status: 503, statusText: 'Offline' });
+        }
+      })()
+    );
+    return;
+  }
 
-      // لو موجود في الكاش، رجّعه فورًا (سريع + شغال أوفلاين)
-      // وفي الخلفية حاول تحدّثه من النت لو متاح (Stale-While-Revalidate)
-      return cachedResponse || networkFetch || new Response(
-        'عذرًا، هذه الصفحة غير متاحة بدون اتصال بالإنترنت ولم يتم تحميلها من قبل.',
-        { headers: { 'Content-Type': 'text/plain; charset=utf-8' } }
-      );
-    })
+  // صفحات الموقع نفسه (HTML/JS): Network-First
+  // يحاول ياخد أحدث نسخة من النت الأول، ولو فشل (مفيش نت) يرجع للكاش
+  event.respondWith(
+    (async () => {
+      try {
+        const networkResponse = await fetch(event.request);
+        if (networkResponse && networkResponse.status === 200) {
+          const clone = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        }
+        return networkResponse;
+      } catch (err) {
+        const cached = await caches.match(event.request);
+        if (cached) return cached;
+        return new Response(
+          'عذرًا، هذه الصفحة غير متاحة بدون اتصال بالإنترنت ولم يتم تحميلها من قبل.',
+          { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } }
+        );
+      }
+    })()
   );
 });
