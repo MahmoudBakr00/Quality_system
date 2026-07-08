@@ -91,6 +91,10 @@ const ADMIN_SIGNUP_CODE = "CHANGE_ME_1234";
 async function checkSession() {
   try {
     applyTranslations();
+    const rememberedEmail = getRememberedEmail();
+    if (rememberedEmail) {
+      document.getElementById('email').value = rememberedEmail;
+    }
     const { data: { session } } = await sbClient.auth.getSession();
     if (session) {
       window.location.href = 'home.html';
@@ -197,6 +201,9 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
       .from('profiles').select('role').eq('id', data.user.id).single();
 
     if (profileError || !profile) { errorMsg.textContent = '⚠️ لم يتم العثور على بيانات المستخدم'; return; }
+
+    saveRememberedEmail(email);
+    syncAllDataForOffline(); // بدء تنزيل كل البيانات في الخلفية (مش لازم نستناها عشان الدخول ميتأخرش)
 
     window.location.href = 'home.html';
   } catch (error) {
