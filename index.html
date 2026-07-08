@@ -43,6 +43,19 @@ body { background: #0f172a; display: flex; justify-content: center; align-items:
 <div id="errorMsg" class="error-msg"></div>
 </form>
 
+<div id="forgotSection" style="margin-top:6px;">
+<a href="#" id="forgotLink" style="color:#93c5fd; font-size:13px; text-decoration:none; display:block; text-align:center;">نسيت كلمة المرور؟</a>
+</div>
+
+<form id="forgotForm" style="display:none; margin-top:10px;">
+<label>البريد الإلكتروني</label>
+<input type="email" id="forgotEmail" placeholder="example@company.com" required />
+<button type="submit" id="forgotBtn">📩 إرسال رابط إعادة التعيين</button>
+<div id="forgotErrorMsg" class="error-msg"></div>
+<div id="forgotSuccessMsg" class="success-msg"></div>
+<a href="#" id="cancelForgot" style="color:#94a3b8; font-size:12px; text-decoration:none; display:block; text-align:center; margin-top:10px;">إلغاء والرجوع لتسجيل الدخول</a>
+</form>
+
 <form id="registerForm" style="display:none;">
 <label>البريد الإلكتروني</label>
 <input type="email" id="regEmail" placeholder="example@company.com" required />
@@ -97,6 +110,8 @@ tabLogin.addEventListener('click', () => {
   tabRegister.classList.remove('active');
   loginForm.style.display = 'block';
   registerForm.style.display = 'none';
+  document.getElementById('forgotSection').style.display = 'block';
+  document.getElementById('forgotForm').style.display = 'none';
   mainTitle.textContent = '🔐 تسجيل الدخول';
 });
 
@@ -105,7 +120,56 @@ tabRegister.addEventListener('click', () => {
   tabLogin.classList.remove('active');
   registerForm.style.display = 'block';
   loginForm.style.display = 'none';
+  document.getElementById('forgotSection').style.display = 'none';
+  document.getElementById('forgotForm').style.display = 'none';
   mainTitle.textContent = '📝 إنشاء حساب جديد';
+});
+
+// ============ نسيت كلمة المرور ============
+const forgotLink = document.getElementById('forgotLink');
+const forgotForm = document.getElementById('forgotForm');
+const forgotSection = document.getElementById('forgotSection');
+
+forgotLink.addEventListener('click', (e) => {
+  e.preventDefault();
+  loginForm.style.display = 'none';
+  forgotSection.style.display = 'none';
+  forgotForm.style.display = 'block';
+  mainTitle.textContent = '🔑 إعادة تعيين كلمة المرور';
+});
+
+document.getElementById('cancelForgot').addEventListener('click', (e) => {
+  e.preventDefault();
+  forgotForm.style.display = 'none';
+  forgotSection.style.display = 'block';
+  loginForm.style.display = 'block';
+  mainTitle.textContent = '🔐 تسجيل الدخول';
+});
+
+forgotForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const email = document.getElementById('forgotEmail').value.trim();
+  const errorMsg = document.getElementById('forgotErrorMsg');
+  const successMsg = document.getElementById('forgotSuccessMsg');
+  const btn = document.getElementById('forgotBtn');
+  errorMsg.textContent = '';
+  successMsg.textContent = '';
+  btn.disabled = true;
+  btn.textContent = '⏳ جاري الإرسال...';
+
+  try {
+    const redirectUrl = window.location.origin + window.location.pathname.replace('index.html', '') + 'reset-password.html';
+    const { error } = await client.auth.resetPasswordForEmail(email, { redirectTo: redirectUrl });
+    if (error) throw error;
+    // ملحوظة: لا نكشف هل الإيميل موجود في القاعدة أو لا (لأسباب أمنية)، الرسالة عامة دائمًا
+    successMsg.textContent = '✅ لو الإيميل ده مسجل عندنا، هيوصله رابط لإعادة تعيين كلمة المرور خلال دقائق.';
+    forgotForm.reset();
+  } catch (err) {
+    errorMsg.textContent = '❌ ' + err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '📩 إرسال رابط إعادة التعيين';
+  }
 });
 
 document.getElementById('regRole').addEventListener('change', (e) => {
