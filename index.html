@@ -194,7 +194,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
     if (error) { errorMsg.textContent = '❌ ' + error.message; return; }
     if (!data || !data.user) { errorMsg.textContent = '❌ لم يتم العثور على المستخدم'; return; }
 
-    const { data: profile, error: profileError } = await client
+    const { data: profile, error: profileError } = await sbClient
       .from('profiles').select('role').eq('id', data.user.id).single();
 
     if (profileError || !profile) { errorMsg.textContent = '⚠️ لم يتم العثور على بيانات المستخدم'; return; }
