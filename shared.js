@@ -331,6 +331,67 @@ function getCachedDefectTypes(stageId) {
   } catch (e) { return []; }
 }
 
+// =========================================================
+// مزامنة شاملة: تنزيل كل البيانات (محطات + أنواع عيوب + كل العيوب) محليًا
+// بتتنفذ بعد تسجيل الدخول عشان الموقع يشتغل بالكامل حتى لو النت اتقطع بعدين
+// =========================================================
+const CACHE_ALL_DEFECTS_KEY = 'cached_all_defects';
+const CACHE_LAST_SYNC_KEY = 'cached_last_full_sync';
+
+async function syncAllDataForOffline() {
+  try {
+    const [stagesRes, defectTypesRes, defectsRes] = await Promise.all([
+      sbClient.from('stages').select('*').order('name'),
+      sbClient.from('defect_types').select('*'),
+      sbClient.from('defects').select('*, stages(name)').order('created_at', { ascending: false }),
+    ]);
+
+    if (!stagesRes.error) cacheStages(stagesRes.data);
+
+    if (!defectTypesRes.error) {
+      const grouped = {};
+      (defectTypesRes.data || []).forEach((dt) => {
+        if (!grouped[dt.stage_id]) grouped[dt.stage_id] = [];
+        grouped[dt.stage_id].push(dt);
+      });
+      localStorage.setItem(CACHE_DEFECT_TYPES_KEY, JSON.stringify(grouped));
+    }
+
+    if (!defectsRes.error) {
+      localStorage.setItem(CACHE_ALL_DEFECTS_KEY, JSON.stringify(defectsRes.data || []));
+    }
+
+    localStorage.setItem(CACHE_LAST_SYNC_KEY, new Date().toISOString());
+    return true;
+  } catch (e) {
+    console.warn('فشلت المزامنة الشاملة (غالبًا مفيش نت حاليًا):', e);
+    return false;
+  }
+}
+
+function getCachedAllDefects() {
+  try { return JSON.parse(localStorage.getItem(CACHE_ALL_DEFECTS_KEY) || '[]'); }
+  catch (e) { return []; }
+}
+
+function getLastSyncTime() {
+  return localStorage.getItem(CACHE_LAST_SYNC_KEY);
+}
+
+// =========================================================
+// حفظ إيميل آخر مستخدم دخل (بدون كلمة المرور لأسباب أمان)
+// عشان يظهر جاهز في خانة الإيميل تلقائيًا في المرة الجاية
+// =========================================================
+const REMEMBERED_EMAIL_KEY = 'remembered_email';
+
+function saveRememberedEmail(email) {
+  localStorage.setItem(REMEMBERED_EMAIL_KEY, email);
+}
+
+function getRememberedEmail() {
+  return localStorage.getItem(REMEMBERED_EMAIL_KEY) || '';
+}
+
 // شارة صغيرة قابلة لإعادة الاستخدام توضح عدد العيوب المنتظرة + زر مزامنة يدوي
 function renderPendingBadge(containerId) {
   const container = document.getElementById(containerId);
@@ -366,12 +427,12 @@ window.addEventListener('online', () => {
 });
 
 // =========================================================
-// تسجيل Service Worker لتخزين هيكل الموقع (PWA) والعمل بدون نت بثبات
+// ملحوظة: تم إلغاء استخدام Service Worker (كان بيسبب مشاكل تحميل/ريفريش).
+// نظام الطابور المحلي (Offline Queue) فوق شغال بشكل مستقل تمامًا
+// وهو الحل الفعلي لمشكلة التسجيل بدون نت.
 // =========================================================
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('service-worker.js').catch((err) => {
-      console.warn('فشل تسجيل Service Worker:', err);
-    });
+  navigator.serviceWorker.getRegistrations().then((registrations) => {
+    registrations.forEach((registration) => registration.unregister());
   });
 }
