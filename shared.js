@@ -5,11 +5,125 @@
 // قبل تحميل هذا الملف
 // =========================================================
 
+// =========================================================
+// نظام تبديل اللغة (عربي / إنجليزي)
+// =========================================================
+const TRANSLATIONS = {
+  ar: {
+    login: 'تسجيل الدخول', register_tab: 'تسجيل حساب جديد', login_tab: 'دخول',
+    email_label: 'البريد الإلكتروني', password_label: 'كلمة المرور', role_label: 'الدور',
+    role_technician: 'فني', role_supervisor: 'مشرف', role_admin: 'أدمن',
+    login_btn: 'دخول', create_account_btn: 'إنشاء الحساب',
+    supervisor_hint: 'حسابات المشرفين (Supervisor) تُنشأ فقط من لوحة تحكم الأدمن.',
+    admin_code_label: 'كود تفعيل الأدمن', forgot_password: 'نسيت كلمة المرور؟',
+    send_reset_link: '📩 إرسال رابط إعادة التعيين', cancel_back_login: 'إلغاء والرجوع لتسجيل الدخول',
+    reset_password_title: '🔑 إعادة تعيين كلمة المرور', footer_text: 'نظام تسجيل ومتابعة العيوب',
+    home: '🏠 الرئيسية', logout: 'تسجيل خروج', dashboard: '📊 الداشبورد',
+    register_defect_title: '🔍 تسجيل عيب', track_product_title: '📦 تتبع منتج',
+    register_defect_desc: 'سكان بالكاميرا أو كتابة السيريال يدويًا',
+    track_product_desc: 'اعرف كل ما حدث للمنتج في كل المحطات',
+    dashboard_desc: 'استعراض وإدارة العيوب المسجلة',
+    choose_option: 'اختر من الخيارات التالية', system_title: 'نظام تسجيل ومتابعة العيوب',
+    change_password: '🔑 تغيير كلمة المرور',
+    serial_label: 'السيريال', scan_btn: '📷 سكان', stage_label: 'محطة الفحص',
+    defect_type_label: 'نوع العيب', description_label: 'وصف العيب (اختياري)',
+    submit_defect_btn: '✅ تسجيل العيب', search_btn: '🔍 بحث',
+    manage_stations: '🏭 إدارة المحطات', manage_users: '👥 إدارة المستخدمين',
+    all_stations: 'كل المحطات', all_statuses: 'كل الحالات',
+    status_pending: 'قيد المراجعة', status_approved: 'معتمد', status_rejected: 'مرفوض',
+    filter_btn: '🔍 تصفية', reset_btn: '↺ إعادة تعيين', export_btn: '⬇ تصدير',
+    delete_selected: '🗑 حذف المحدد', print_report: '🖨️ طباعة / حفظ كـ PDF',
+    col_serial: 'السيريال', col_job_order: 'الجوب أوردر', col_station: 'المحطة',
+    col_defect_type: 'نوع العيب', col_status: 'الحالة', col_technician: 'الفني', col_date: 'التاريخ',
+    add_new_user: '➕ إضافة مستخدم جديد (مشرف / أدمن / فني)',
+    registered_users: '📋 المستخدمين المسجلين', create_account: '➕ إنشاء حساب',
+  },
+  en: {
+    login: 'Login', register_tab: 'Create Account', login_tab: 'Login',
+    email_label: 'Email', password_label: 'Password', role_label: 'Role',
+    role_technician: 'Technician', role_supervisor: 'Supervisor', role_admin: 'Admin',
+    login_btn: 'Login', create_account_btn: 'Create Account',
+    supervisor_hint: 'Supervisor accounts can only be created from the admin panel.',
+    admin_code_label: 'Admin Activation Code', forgot_password: 'Forgot password?',
+    send_reset_link: '📩 Send Reset Link', cancel_back_login: 'Cancel and back to login',
+    reset_password_title: '🔑 Reset Password', footer_text: 'Defect Tracking System',
+    home: '🏠 Home', logout: 'Logout', dashboard: '📊 Dashboard',
+    register_defect_title: '🔍 Register Defect', track_product_title: '📦 Track Product',
+    register_defect_desc: 'Scan with camera or type the serial manually',
+    track_product_desc: 'See everything that happened to the product across all stations',
+    dashboard_desc: 'View and manage registered defects',
+    choose_option: 'Choose one of the following options', system_title: 'Defect Tracking System',
+    change_password: '🔑 Change Password',
+    serial_label: 'Serial Number', scan_btn: '📷 Scan', stage_label: 'Inspection Station',
+    defect_type_label: 'Defect Type', description_label: 'Defect Description (optional)',
+    submit_defect_btn: '✅ Register Defect', search_btn: '🔍 Search',
+    manage_stations: '🏭 Manage Stations', manage_users: '👥 Manage Users',
+    all_stations: 'All Stations', all_statuses: 'All Statuses',
+    status_pending: 'Pending', status_approved: 'Approved', status_rejected: 'Rejected',
+    filter_btn: '🔍 Filter', reset_btn: '↺ Reset', export_btn: '⬇ Export',
+    delete_selected: '🗑 Delete Selected', print_report: '🖨️ Print / Save as PDF',
+    col_serial: 'Serial', col_job_order: 'Job Order', col_station: 'Station',
+    col_defect_type: 'Defect Type', col_status: 'Status', col_technician: 'Technician', col_date: 'Date',
+    add_new_user: '➕ Add New User (Supervisor / Admin / Technician)',
+    registered_users: '📋 Registered Users', create_account: '➕ Create Account',
+  }
+};
+
+function getLang() {
+  return localStorage.getItem('app_lang') || 'ar';
+}
+
+function setLang(lang) {
+  localStorage.setItem('app_lang', lang);
+}
+
+function t(key) {
+  const lang = getLang();
+  return (TRANSLATIONS[lang] && TRANSLATIONS[lang][key]) || TRANSLATIONS.ar[key] || key;
+}
+
+function applyDirection() {
+  const lang = getLang();
+  document.documentElement.lang = lang;
+  document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
+}
+
+// يطبّق الترجمة على أي عنصر عليه data-i18n أو data-i18n-placeholder
+function applyTranslations() {
+  applyDirection();
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    el.textContent = t(el.getAttribute('data-i18n'));
+  });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+    el.placeholder = t(el.getAttribute('data-i18n-placeholder'));
+  });
+}
+
+function toggleLang() {
+  setLang(getLang() === 'ar' ? 'en' : 'ar');
+  location.reload();
+}
+
+// عنصر زر تبديل اللغة، يُضاف داخل أي header عن طريق استدعاء renderLangToggle('containerId')
+function renderLangToggle(containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  const btn = document.createElement('button');
+  btn.textContent = getLang() === 'ar' ? '🌐 EN' : '🌐 عربي';
+  btn.style.cssText = 'color:#93c5fd; background:#334155; border:none; padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer;';
+  btn.addEventListener('click', toggleLang);
+  container.appendChild(btn);
+}
+
 const SUPABASE_URL = "https://igdfaqiaprhgsdrqcxfj.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_2Vw18qr3DeAt7Ge7onvXLA_Gr02sm2e";
 const sbClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-const ROLE_NAMES = { admin: 'أدمن', supervisor: 'مشرف', technician: 'فني' };
+function getRoleName(role) {
+  return t('role_' + role) || role;
+}
+// للتوافق مع الكود القديم اللي بيستخدم ROLE_NAMES مباشرة
+const ROLE_NAMES = new Proxy({}, { get: (_, role) => getRoleName(role) });
 
 // =========================================================
 // التحقق من الجلسة + جلب البروفايل، مع إمكانية تقييد الصفحة بأدوار معينة
@@ -51,17 +165,11 @@ async function logout() {
 
 // =========================================================
 // استخراج الجوب أوردر من السيريال (نسخة طرف العميل، مطابقة لدالة قاعدة البيانات)
+// القاعدة: تجاهل أول 3 حروف/أرقام من الشمال، وخد الـ 8 اللي بعدهم
 // =========================================================
 function extractJobOrder(serial) {
-  if (!serial) return null;
-  const parts = serial.split('-');
-  if (parts.length < 2) return null;
-  const seg = parts[1];
-  if (!seg) return null;
-  if (seg.length === 8) {
-    return seg.substring(0, 6) + ' ' + seg.substring(6, 8);
-  }
-  return seg;
+  if (!serial || serial.length <= 3) return null;
+  return serial.substring(3, 11);
 }
 
 // =========================================================
