@@ -78,7 +78,6 @@ body { background: #0f172a; display: flex; justify-content: center; align-items:
 </form>
 
 <div class="footer" data-i18n="footer_text">نظام تسجيل ومتابعة العيوب</div>
-<div style="text-align:center; margin-top:10px;" id="langToggleWrap"></div>
 </div>
 
 <script>
@@ -91,7 +90,6 @@ const ADMIN_SIGNUP_CODE = "CHANGE_ME_1234";
 async function checkSession() {
   try {
     applyTranslations();
-    renderLangToggle('langToggleWrap');
     const { data: { session } } = await sbClient.auth.getSession();
     if (session) {
       window.location.href = 'home.html';
