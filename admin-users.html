@@ -35,6 +35,10 @@ body { background: #0f172a; padding: 20px; color: #f1f5f9; }
 .user-card { background: #334155; border-radius: 10px; padding: 14px 18px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
 .user-card .info .name { font-weight: bold; }
 .user-card .info .email { font-size: 12px; color: #94a3b8; }
+.user-card .role-edit { display: flex; align-items: center; gap: 8px; }
+.user-card .role-edit select { padding: 6px 10px; border: none; border-radius: 6px; background: #1e293b; color: #f1f5f9; font-size: 12px; }
+.save-role-btn { background: #3b82f6; color: white; border: none; padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 11px; font-weight: bold; }
+.save-role-btn:hover { background: #2563eb; }
 .role-tag { padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: bold; }
 .role-tag.admin { background: #8b5cf6; color: white; }
 .role-tag.supervisor { background: #3b82f6; color: white; }
@@ -45,32 +49,33 @@ body { background: #0f172a; padding: 20px; color: #f1f5f9; }
 <body>
 <div class="container">
 <div class="header">
-<h1>👥 إدارة المستخدمين</h1>
+<h1 data-i18n="manage_users">👥 إدارة المستخدمين</h1>
 <div class="nav-links">
-<a href="dashboard.html">📊 الداشبورد</a>
-<a href="home.html">🏠 الرئيسية</a>
-<button class="logout-btn" id="logoutBtn">تسجيل خروج</button>
+<a href="dashboard.html" data-i18n="dashboard">📊 الداشبورد</a>
+<a href="home.html" data-i18n="home">🏠 الرئيسية</a>
+<div id="langToggleWrap"></div>
+<button class="logout-btn" id="logoutBtn" data-i18n="logout">تسجيل خروج</button>
 </div>
 </div>
 
 <div class="panel">
-<h2>➕ إضافة مستخدم جديد (مشرف / أدمن / فني)</h2>
+<h2 data-i18n="add_new_user">➕ إضافة مستخدم جديد (مشرف / أدمن / فني)</h2>
 <div class="user-form">
   <div class="row">
     <div class="field">
-      <label>📧 البريد الإلكتروني</label>
+      <label data-i18n="email_label">📧 البريد الإلكتروني</label>
       <input type="email" id="newUserEmail" placeholder="example@company.com" />
     </div>
     <div class="field">
-      <label>👤 الدور</label>
+      <label data-i18n="role_label">👤 الدور</label>
       <select id="newUserRole">
-        <option value="supervisor">مشرف</option>
-        <option value="technician">فني</option>
-        <option value="admin">أدمن</option>
+        <option value="supervisor" data-i18n="role_supervisor">مشرف</option>
+        <option value="technician" data-i18n="role_technician">فني</option>
+        <option value="admin" data-i18n="role_admin">أدمن</option>
       </select>
     </div>
     <div class="actions">
-      <button class="btn-primary" id="createUserBtn">➕ إنشاء حساب</button>
+      <button class="btn-primary" id="createUserBtn" data-i18n="create_account">➕ إنشاء حساب</button>
     </div>
     <div class="temp-password" id="tempPasswordDisplay">
       <label style="color:#94a3b8;font-size:12px;">🔑 كلمة المرور المؤقتة:</label>
@@ -82,7 +87,7 @@ body { background: #0f172a; padding: 20px; color: #f1f5f9; }
 </div>
 
 <div class="panel">
-<h2>📋 المستخدمين المسجلين</h2>
+<h2 data-i18n="registered_users">📋 المستخدمين المسجلين</h2>
 <div id="usersList"><div class="hint">⏳ جاري التحميل...</div></div>
 </div>
 </div>
@@ -92,6 +97,8 @@ body { background: #0f172a; padding: 20px; color: #f1f5f9; }
 let currentUser = null;
 
 async function init() {
+  applyTranslations();
+  renderLangToggle('langToggleWrap');
   const auth = await requireAuth(['admin']);
   if (!auth) return;
   currentUser = auth.user;
@@ -116,9 +123,40 @@ async function loadUsers() {
       <div class="info">
         <div class="name">${u.email || 'بدون بريد'} ${isCurrent ? '⭐' : ''}</div>
       </div>
-      <span class="role-tag ${u.role}">${ROLE_NAMES[u.role] || u.role}</span>
+      <div class="role-edit">
+        <select class="role-select" data-user-id="${u.id}">
+          <option value="technician" ${u.role === 'technician' ? 'selected' : ''}>${t('role_technician')}</option>
+          <option value="supervisor" ${u.role === 'supervisor' ? 'selected' : ''}>${t('role_supervisor')}</option>
+          <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>${t('role_admin')}</option>
+        </select>
+        <button class="save-role-btn" data-user-id="${u.id}">💾 حفظ</button>
+      </div>
     `;
     container.appendChild(div);
+  });
+
+  container.querySelectorAll('.save-role-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const userId = btn.dataset.userId;
+      const select = container.querySelector(`.role-select[data-user-id="${userId}"]`);
+      const newRole = select.value;
+
+      if (userId === currentUser.id && newRole !== 'admin') {
+        if (!confirm('⚠️ أنت بصدد تغيير دورك أنت شخصيًا وقد تفقد صلاحيات الأدمن فورًا. متابعة؟')) return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = '⏳';
+      const { error } = await sbClient.from('profiles').update({ role: newRole }).eq('id', userId);
+      if (error) {
+        alert('❌ فشل التحديث: ' + error.message);
+      } else {
+        alert('✅ تم تحديث الدور بنجاح');
+      }
+      btn.disabled = false;
+      btn.textContent = '💾 حفظ';
+      loadUsers();
+    });
   });
 }
 
