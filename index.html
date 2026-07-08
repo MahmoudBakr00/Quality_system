@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<link rel="manifest" href="manifest.json" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>تسجيل الدخول - نظام تسجيل العيوب</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="shared.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+body { background: #0f172a; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+.login-container { background: #1e293b; padding: 40px; border-radius: 16px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); width: 100%; max-width: 400px; }
+.login-container h2 { color: #f8fafc; text-align: center; margin-bottom: 24px; font-size: 26px; }
+.login-container label { color: #cbd5e1; display: block; margin-bottom: 6px; font-weight: 600; }
+.login-container input, .login-container select { width: 100%; padding: 12px 16px; margin-bottom: 20px; border: none; border-radius: 8px; background: #334155; color: #f1f5f9; font-size: 16px; }
+.login-container input:focus, .login-container select:focus { outline: 2px solid #3b82f6; }
+.login-container button[type="submit"] { width: 100%; padding: 14px; background: #3b82f6; color: white; border: none; border-radius: 8px; font-size: 18px; font-weight: bold; cursor: pointer; }
+.login-container button[type="submit"]:hover { background: #2563eb; }
+.login-container button:disabled { opacity: 0.6; cursor: not-allowed; }
+.error-msg { color: #f87171; text-align: center; margin-top: 12px; font-size: 14px; }
+.success-msg { color: #4ade80; text-align: center; margin-top: 12px; font-size: 14px; }
+.footer { text-align: center; color: #475569; margin-top: 20px; font-size: 12px; }
+.tabs { display: flex; background: #0f172a; border-radius: 10px; padding: 4px; margin-bottom: 24px; }
+.tabs button { flex: 1; padding: 10px; border: none; border-radius: 8px; background: transparent; color: #94a3b8; font-weight: bold; font-size: 14px; cursor: pointer; }
+.tabs button.active { background: #3b82f6; color: white; }
+.hint-small { color: #64748b; font-size: 12px; margin: -14px 0 16px; }
+</style>
+</head>
+<body>
+<div class="login-container">
+<h2 id="mainTitle" data-i18n="login">🔐 تسجيل الدخول</h2>
+
+<div class="tabs">
+  <button type="button" id="tabLogin" class="active" data-i18n="login_tab">دخول</button>
+  <button type="button" id="tabRegister" data-i18n="register_tab">تسجيل حساب جديد</button>
+</div>
+
+<form id="loginForm">
+<label data-i18n="email_label">البريد الإلكتروني</label>
+<input type="email" id="email" placeholder="example@company.com" required />
+<label data-i18n="password_label">كلمة المرور</label>
+<input type="password" id="password" placeholder="••••••••" required />
+<button type="submit" id="loginBtn" data-i18n="login_btn">دخول</button>
+<div id="errorMsg" class="error-msg"></div>
+</form>
+
+<div id="forgotSection" style="margin-top:6px;">
+<a href="#" id="forgotLink" data-i18n="forgot_password" style="color:#93c5fd; font-size:13px; text-decoration:none; display:block; text-align:center;">نسيت كلمة المرور؟</a>
+</div>
+
+<form id="forgotForm" style="display:none; margin-top:10px;">
+<label data-i18n="email_label">البريد الإلكتروني</label>
+<input type="email" id="forgotEmail" placeholder="example@company.com" required />
+<button type="submit" id="forgotBtn" data-i18n="send_reset_link">📩 إرسال رابط إعادة التعيين</button>
+<div id="forgotErrorMsg" class="error-msg"></div>
+<div id="forgotSuccessMsg" class="success-msg"></div>
+<a href="#" id="cancelForgot" data-i18n="cancel_back_login" style="color:#94a3b8; font-size:12px; text-decoration:none; display:block; text-align:center; margin-top:10px;">إلغاء والرجوع لتسجيل الدخول</a>
+</form>
+
+<form id="registerForm" style="display:none;">
+<label data-i18n="email_label">البريد الإلكتروني</label>
+<input type="email" id="regEmail" placeholder="example@company.com" required />
+<label data-i18n="password_label">كلمة المرور</label>
+<input type="password" id="regPassword" placeholder="••••••••" minlength="6" required />
+<label data-i18n="role_label">الدور</label>
+<select id="regRole">
+  <option value="technician" data-i18n="role_technician">فني</option>
+  <option value="admin" data-i18n="role_admin">أدمن</option>
+</select>
+<div class="hint-small" data-i18n="supervisor_hint">حسابات المشرفين (Supervisor) تُنشأ فقط من لوحة تحكم الأدمن.</div>
+<div id="adminCodeWrap" style="display:none;">
+  <label data-i18n="admin_code_label">كود تفعيل الأدمن</label>
+  <input type="password" id="adminCode" placeholder="أدخل كود الأدمن السري" />
+</div>
+<button type="submit" id="registerBtn" data-i18n="create_account_btn">إنشاء الحساب</button>
+<div id="regErrorMsg" class="error-msg"></div>
+<div id="regSuccessMsg" class="success-msg"></div>
+</form>
+
+<div class="footer" data-i18n="footer_text">نظام تسجيل ومتابعة العيوب</div>
+</div>
+
+<script>
+// ملحوظة: SUPABASE_URL/SUPABASE_ANON_KEY/sbClient معرّفين بالفعل في shared.js
+// اللي بيتم تحميله قبل هذا الـ script
+
+// ⚠️ غيّر الكود ده لكود خاص بيك قبل الاستخدام الفعلي
+const ADMIN_SIGNUP_CODE = "CHANGE_ME_1234";
+
+async function checkSession() {
+  try {
+    applyTranslations();
+    const { data: { session } } = await sbClient.auth.getSession();
+    if (session) {
+      window.location.href = 'home.html';
+    }
+  } catch (error) {
+    console.error('Session check error:', error);
+  }
+}
+checkSession();
+
+const tabLogin = document.getElementById('tabLogin');
+const tabRegister = document.getElementById('tabRegister');
+const loginForm = document.getElementById('loginForm');
+const registerForm = document.getElementById('registerForm');
+const mainTitle = document.getElementById('mainTitle');
+
+tabLogin.addEventListener('click', () => {
+  tabLogin.classList.add('active');
+  tabRegister.classList.remove('active');
+  loginForm.style.display = 'block';
+  registerForm.style.display = 'none';
+  document.getElementById('forgotSection').style.display = 'block';
+  document.getElementById('forgotForm').style.display = 'none';
+  mainTitle.textContent = t('login');
+});
+
+tabRegister.addEventListener('click', () => {
+  tabRegister.classList.add('active');
+  tabLogin.classList.remove('active');
+  registerForm.style.display = 'block';
+  loginForm.style.display = 'none';
+  document.getElementById('forgotSection').style.display = 'none';
+  document.getElementById('forgotForm').style.display = 'none';
+  mainTitle.textContent = '📝 ' + (getLang() === 'ar' ? 'إنشاء حساب جديد' : 'Create New Account');
+});
+
+// ============ نسيت كلمة المرور ============
+const forgotLink = document.getElementById('forgotLink');
+const forgotForm = document.getElementById('forgotForm');
+const forgotSection = document.getElementById('forgotSection');
+
+forgotLink.addEventListener('click', (e) => {
+  e.preventDefault();
+  loginForm.style.display = 'none';
+  forgotSection.style.display = 'none';
+  forgotForm.style.display = 'block';
+  mainTitle.textContent = t('reset_password_title');
+});
+
+document.getElementById('cancelForgot').addEventListener('click', (e) => {
+  e.preventDefault();
+  forgotForm.style.display = 'none';
+  forgotSection.style.display = 'block';
+  loginForm.style.display = 'block';
+  mainTitle.textContent = t('login');
+});
+
+forgotForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const email = document.getElementById('forgotEmail').value.trim();
+  const errorMsg = document.getElementById('forgotErrorMsg');
+  const successMsg = document.getElementById('forgotSuccessMsg');
+  const btn = document.getElementById('forgotBtn');
+  errorMsg.textContent = '';
+  successMsg.textContent = '';
+  btn.disabled = true;
+  btn.textContent = '⏳ جاري الإرسال...';
+
+  try {
+    const redirectUrl = window.location.origin + window.location.pathname.replace('index.html', '') + 'reset-password.html';
+    const { error } = await sbClient.auth.resetPasswordForEmail(email, { redirectTo: redirectUrl });
+    if (error) throw error;
+    // ملحوظة: لا نكشف هل الإيميل موجود في القاعدة أو لا (لأسباب أمنية)، الرسالة عامة دائمًا
+    successMsg.textContent = '✅ لو الإيميل ده مسجل عندنا، هيوصله رابط لإعادة تعيين كلمة المرور خلال دقائق.';
+    forgotForm.reset();
+  } catch (err) {
+    errorMsg.textContent = '❌ ' + err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '📩 إرسال رابط إعادة التعيين';
+  }
+});
+
+document.getElementById('regRole').addEventListener('change', (e) => {
+  document.getElementById('adminCodeWrap').style.display = e.target.value === 'admin' ? 'block' : 'none';
+});
+
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const email = document.getElementById('email').value.trim();
+  const password = document.getElementById('password').value;
+  const errorMsg = document.getElementById('errorMsg');
+  const btn = document.getElementById('loginBtn');
+  errorMsg.textContent = '';
+  btn.disabled = true;
+  btn.textContent = '⏳ جاري الدخول...';
+
+  try {
+    const { data, error } = await sbClient.auth.signInWithPassword({ email, password });
+    if (error) { errorMsg.textContent = '❌ ' + error.message; return; }
+    if (!data || !data.user) { errorMsg.textContent = '❌ لم يتم العثور على المستخدم'; return; }
+
+    const { data: profile, error: profileError } = await sbClient
+      .from('profiles').select('role').eq('id', data.user.id).single();
+
+    if (profileError || !profile) { errorMsg.textContent = '⚠️ لم يتم العثور على بيانات المستخدم'; return; }
+
+    window.location.href = 'home.html';
+  } catch (error) {
+    errorMsg.textContent = '❌ حدث خطأ: ' + error.message;
+    console.error('Login error:', error);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'دخول';
+  }
+});
+
+registerForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const email = document.getElementById('regEmail').value.trim();
+  const password = document.getElementById('regPassword').value;
+  const role = document.getElementById('regRole').value;
+  const adminCode = document.getElementById('adminCode').value;
+  const regErrorMsg = document.getElementById('regErrorMsg');
+  const regSuccessMsg = document.getElementById('regSuccessMsg');
+  const btn = document.getElementById('registerBtn');
+
+  regErrorMsg.textContent = '';
+  regSuccessMsg.textContent = '';
+
+  if (role === 'admin' && adminCode !== ADMIN_SIGNUP_CODE) {
+    regErrorMsg.textContent = '❌ كود تفعيل الأدمن غير صحيح';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '⏳ جاري إنشاء الحساب...';
+
+  try {
+    const { data, error } = await sbClient.auth.signUp({
+      email, password, options: { data: { role } }
+    });
+    if (error) throw error;
+
+    regSuccessMsg.textContent = '✅ تم إنشاء الحساب بنجاح! يمكنك الآن تسجيل الدخول.';
+    registerForm.reset();
+    document.getElementById('adminCodeWrap').style.display = 'none';
+    setTimeout(() => { tabLogin.click(); }, 1500);
+  } catch (err) {
+    regErrorMsg.textContent = '❌ ' + err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'إنشاء الحساب';
+  }
+});
+</script>
+</body>
+</html>

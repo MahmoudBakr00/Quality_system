@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<link rel="manifest" href="manifest.json" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>الرئيسية - نظام تسجيل العيوب</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="shared.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+body { background: #0f172a; padding: 20px; color: #f1f5f9; min-height: 100vh; }
+.container { max-width: 900px; margin: 0 auto; }
+.header { display: flex; justify-content: space-between; align-items: center; background: #1e293b; padding: 16px 24px; border-radius: 14px; margin-bottom: 30px; flex-wrap: wrap; gap: 10px; }
+.header .user-info { color: #94a3b8; font-size: 14px; }
+.header .role-badge { background: #334155; color: #60a5fa; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; margin-right: 8px; }
+.logout-btn { background: #ef4444; color: white; border: none; padding: 8px 20px; border-radius: 8px; font-weight: bold; cursor: pointer; }
+.logout-btn:hover { background: #dc2626; }
+
+.welcome { text-align: center; margin-bottom: 40px; }
+.welcome h1 { color: #60a5fa; font-size: 26px; margin-bottom: 8px; }
+.welcome p { color: #94a3b8; }
+
+.cards-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; }
+.card { background: #1e293b; border-radius: 16px; padding: 32px 20px; text-align: center; cursor: pointer; transition: 0.2s; text-decoration: none; color: inherit; display: block; }
+.card:hover { background: #263548; transform: translateY(-4px); }
+.card .icon { font-size: 40px; margin-bottom: 14px; }
+.card .title { font-size: 18px; font-weight: bold; color: #f1f5f9; margin-bottom: 6px; }
+.card .desc { color: #94a3b8; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="container">
+<div class="header">
+<div class="user-info">👤 <span id="userEmail">-</span> <span class="role-badge" id="roleBadge">-</span></div>
+<div style="display:flex; gap:10px; align-items:center;">
+<a href="change-password.html" data-i18n="change_password" style="color:#93c5fd; text-decoration:none; background:#334155; padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600;">🔑 تغيير كلمة المرور</a>
+<div id="langToggleWrap"></div>
+<button class="logout-btn" id="logoutBtn" data-i18n="logout">تسجيل خروج</button>
+</div>
+</div>
+
+<div class="welcome">
+<h1 data-i18n="system_title">نظام تسجيل ومتابعة العيوب</h1>
+<p data-i18n="choose_option">اختر من الخيارات التالية</p>
+</div>
+
+<div id="pendingBadgeWrap" style="max-width:500px; margin:0 auto 20px;"></div>
+
+<div class="cards-grid">
+<a href="register-defect.html" class="card">
+  <div class="icon">🔍</div>
+  <div class="title" data-i18n="register_defect_title">تسجيل عيب</div>
+  <div class="desc" data-i18n="register_defect_desc">سكان بالكاميرا أو كتابة السيريال يدويًا</div>
+</a>
+<a href="track-product.html" class="card">
+  <div class="icon">📦</div>
+  <div class="title" data-i18n="track_product_title">تتبع منتج</div>
+  <div class="desc" data-i18n="track_product_desc">اعرف كل ما حدث للمنتج في كل المحطات</div>
+</a>
+<a href="dashboard.html" class="card">
+  <div class="icon">📊</div>
+  <div class="title" data-i18n="dashboard">الداشبورد</div>
+  <div class="desc" data-i18n="dashboard_desc">استعراض وإدارة العيوب المسجلة</div>
+</a>
+</div>
+</div>
+
+<script>
+// SUPABASE_URL/SUPABASE_ANON_KEY/sbClient معرّفين بالفعل في shared.js
+
+async function checkAuth() {
+  applyTranslations();
+  renderLangToggle('langToggleWrap');
+  renderPendingBadge('pendingBadgeWrap');
+  const { data: { user } } = await sbClient.auth.getUser();
+  if (!user) { window.location.href = 'index.html'; return; }
+
+  const { data: profile, error } = await sbClient.from('profiles').select('role').eq('id', user.id).single();
+  if (error || !profile) {
+    console.error('Profile error:', error);
+    await sbClient.auth.signOut();
+    window.location.href = 'index.html';
+    return;
+  }
+
+  document.getElementById('userEmail').textContent = user.email;
+  document.getElementById('roleBadge').textContent = getRoleName(profile.role) || profile.role;
+}
+checkAuth();
+
+document.getElementById('logoutBtn').addEventListener('click', async () => {
+  await sbClient.auth.signOut();
+  window.location.href = 'index.html';
+});
+</script>
+</body>
+</html>

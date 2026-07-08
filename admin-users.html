@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<link rel="manifest" href="manifest.json" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>إدارة المستخدمين - الأدمن</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+body { background: #0f172a; padding: 20px; color: #f1f5f9; }
+.container { max-width: 900px; margin: 0 auto; }
+.header { display: flex; justify-content: space-between; align-items: center; background: #1e293b; padding: 16px 24px; border-radius: 14px; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
+.header h1 { color: #60a5fa; font-size: 20px; }
+.nav-links { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.nav-links a { color: #93c5fd; text-decoration: none; background: #334155; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; }
+.nav-links a:hover { background: #475569; }
+.logout-btn { background: #ef4444; color: white; border: none; padding: 8px 20px; border-radius: 8px; font-weight: bold; cursor: pointer; }
+.logout-btn:hover { background: #dc2626; }
+
+.panel { background: #1e293b; border-radius: 14px; padding: 24px; margin-bottom: 20px; }
+.panel h2 { color: #60a5fa; margin-bottom: 16px; font-size: 17px; }
+
+.user-form { background: #0f172a; padding: 20px; border-radius: 12px; }
+.user-form .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.field { display: flex; flex-direction: column; }
+.field label { font-size: 12px; color: #94a3b8; margin-bottom: 4px; }
+.field input, .field select { padding: 10px; border: none; border-radius: 6px; background: #334155; color: #f1f5f9; }
+.actions { grid-column: 1/-1; display: flex; gap: 10px; margin-top: 10px; }
+.btn-primary { background: #3b82f6; color: white; border: none; padding: 10px 24px; border-radius: 8px; cursor: pointer; font-weight: bold; }
+.btn-primary:hover { background: #2563eb; }
+
+.temp-password { background: #1e293b; padding: 12px; border-radius: 8px; margin-top: 14px; display: none; grid-column: 1/-1; }
+.temp-password .pass { color: #fbbf24; font-size: 18px; font-weight: bold; direction: ltr; }
+
+.user-card { background: #334155; border-radius: 10px; padding: 14px 18px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+.user-card .info .name { font-weight: bold; }
+.user-card .info .email { font-size: 12px; color: #94a3b8; }
+.user-card .role-edit { display: flex; align-items: center; gap: 8px; }
+.user-card .role-edit select { padding: 6px 10px; border: none; border-radius: 6px; background: #1e293b; color: #f1f5f9; font-size: 12px; }
+.save-role-btn { background: #3b82f6; color: white; border: none; padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 11px; font-weight: bold; }
+.save-role-btn:hover { background: #2563eb; }
+.role-tag { padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: bold; }
+.role-tag.admin { background: #8b5cf6; color: white; }
+.role-tag.supervisor { background: #3b82f6; color: white; }
+.role-tag.technician { background: #64748b; color: white; }
+.hint { color: #64748b; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="container">
+<div class="header">
+<h1 data-i18n="manage_users">👥 إدارة المستخدمين</h1>
+<div class="nav-links">
+<a href="dashboard.html" data-i18n="dashboard">📊 الداشبورد</a>
+<a href="home.html" data-i18n="home">🏠 الرئيسية</a>
+<div id="langToggleWrap"></div>
+<button class="logout-btn" id="logoutBtn" data-i18n="logout">تسجيل خروج</button>
+</div>
+</div>
+
+<div class="panel">
+<h2 data-i18n="add_new_user">➕ إضافة مستخدم جديد (مشرف / أدمن / فني)</h2>
+<div class="user-form">
+  <div class="row">
+    <div class="field">
+      <label data-i18n="email_label">📧 البريد الإلكتروني</label>
+      <input type="email" id="newUserEmail" placeholder="example@company.com" />
+    </div>
+    <div class="field">
+      <label data-i18n="role_label">👤 الدور</label>
+      <select id="newUserRole">
+        <option value="supervisor" data-i18n="role_supervisor">مشرف</option>
+        <option value="technician" data-i18n="role_technician">فني</option>
+        <option value="admin" data-i18n="role_admin">أدمن</option>
+      </select>
+    </div>
+    <div class="actions">
+      <button class="btn-primary" id="createUserBtn" data-i18n="create_account">➕ إنشاء حساب</button>
+    </div>
+    <div class="temp-password" id="tempPasswordDisplay">
+      <label style="color:#94a3b8;font-size:12px;">🔑 كلمة المرور المؤقتة:</label>
+      <div class="pass" id="tempPasswordText">********</div>
+      <small style="color:#94a3b8;">سلّم الكلمة دي بنفسك للموظف (لن تُرسل تلقائيًا).</small>
+    </div>
+  </div>
+</div>
+</div>
+
+<div class="panel">
+<h2 data-i18n="registered_users">📋 المستخدمين المسجلين</h2>
+<div id="usersList"><div class="hint">⏳ جاري التحميل...</div></div>
+</div>
+</div>
+
+<script src="shared.js"></script>
+<script>
+let currentUser = null;
+
+async function init() {
+  applyTranslations();
+  renderLangToggle('langToggleWrap');
+  const auth = await requireAuth(['admin']);
+  if (!auth) return;
+  currentUser = auth.user;
+  loadUsers();
+}
+init();
+
+document.getElementById('logoutBtn').addEventListener('click', logout);
+
+async function loadUsers() {
+  const { data, error } = await sbClient.from('profiles').select('id, email, role').order('created_at');
+  const container = document.getElementById('usersList');
+  if (error) { container.innerHTML = `<div class="hint">❌ فشل التحميل</div>`; return; }
+  if (!data || data.length === 0) { container.innerHTML = `<div class="hint">📭 لا يوجد مستخدمين</div>`; return; }
+
+  container.innerHTML = '';
+  data.forEach(u => {
+    const isCurrent = u.id === currentUser.id;
+    const div = document.createElement('div');
+    div.className = 'user-card';
+    div.innerHTML = `
+      <div class="info">
+        <div class="name">${u.email || 'بدون بريد'} ${isCurrent ? '⭐' : ''}</div>
+      </div>
+      <div class="role-edit">
+        <select class="role-select" data-user-id="${u.id}">
+          <option value="technician" ${u.role === 'technician' ? 'selected' : ''}>${t('role_technician')}</option>
+          <option value="supervisor" ${u.role === 'supervisor' ? 'selected' : ''}>${t('role_supervisor')}</option>
+          <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>${t('role_admin')}</option>
+        </select>
+        <button class="save-role-btn" data-user-id="${u.id}">💾 حفظ</button>
+      </div>
+    `;
+    container.appendChild(div);
+  });
+
+  container.querySelectorAll('.save-role-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const userId = btn.dataset.userId;
+      const select = container.querySelector(`.role-select[data-user-id="${userId}"]`);
+      const newRole = select.value;
+
+      if (userId === currentUser.id && newRole !== 'admin') {
+        if (!confirm('⚠️ أنت بصدد تغيير دورك أنت شخصيًا وقد تفقد صلاحيات الأدمن فورًا. متابعة؟')) return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = '⏳';
+      const { error } = await sbClient.from('profiles').update({ role: newRole }).eq('id', userId);
+      if (error) {
+        alert('❌ فشل التحديث: ' + error.message);
+      } else {
+        alert('✅ تم تحديث الدور بنجاح');
+      }
+      btn.disabled = false;
+      btn.textContent = '💾 حفظ';
+      loadUsers();
+    });
+  });
+}
+
+document.getElementById('createUserBtn').addEventListener('click', async () => {
+  const email = document.getElementById('newUserEmail').value.trim();
+  const role = document.getElementById('newUserRole').value;
+
+  if (!email) { alert('⚠️ يرجى إدخال البريد الإلكتروني'); return; }
+
+  const tempPassword = generateTempPassword();
+
+  try {
+    const { data, error } = await sbClient.auth.signUp({
+      email, password: tempPassword, options: { data: { role } }
+    });
+    if (error) throw error;
+
+    document.getElementById('tempPasswordText').textContent = tempPassword;
+    document.getElementById('tempPasswordDisplay').style.display = 'block';
+
+    alert(`✅ تم إنشاء الحساب بنجاح!\n\n📧 البريد: ${email}\n🔑 كلمة المرور المؤقتة: ${tempPassword}\n\n⚠️ سلّمها بنفسك للموظف.`);
+
+    loadUsers();
+    document.getElementById('newUserEmail').value = '';
+  } catch (err) {
+    alert('❌ فشل إنشاء الحساب: ' + err.message);
+  }
+});
+
+function generateTempPassword() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+  let password = '';
+  for (let i = 0; i < 12; i++) {
+    password += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return password;
+}
+</script>
+</body>
+</html>
