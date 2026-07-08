@@ -48,35 +48,38 @@ textarea { resize: vertical; min-height: 80px; }
 <body>
 <div class="container">
 <div class="sub-header">
-<a href="home.html" class="back-link">⬅ الرئيسية</a>
+<a href="home.html" class="back-link" data-i18n="home">⬅ الرئيسية</a>
+<div style="display:flex; align-items:center; gap:10px;">
+<div id="langToggleWrap"></div>
 <span id="userEmail" style="color:#94a3b8; font-size:13px;"></span>
+</div>
 </div>
 
 <div class="view">
-<h1>🔍 تسجيل عيب جديد</h1>
+<h1 data-i18n="register_defect_title">🔍 تسجيل عيب جديد</h1>
 <form id="defectForm">
 
-<label>السيريال</label>
+<label data-i18n="serial_label">السيريال</label>
 <div class="scan-row">
   <input type="text" id="serialInput" placeholder="اكتب السيريال أو استخدم السكانر" required />
-  <button type="button" class="scan-btn" id="openScannerBtn">📷 سكان</button>
+  <button type="button" class="scan-btn" id="openScannerBtn" data-i18n="scan_btn">📷 سكان</button>
 </div>
 <div class="job-order-preview" id="jobOrderPreview"></div>
 
-<label>محطة الفحص</label>
+<label data-i18n="stage_label">محطة الفحص</label>
 <select id="stageSelect" required>
   <option value="">⏳ جاري تحميل المحطات...</option>
 </select>
 
-<label>نوع العيب</label>
+<label data-i18n="defect_type_label">نوع العيب</label>
 <select id="defectTypeSelect">
   <option value="">-- اختر نوع العيب (اختياري) --</option>
 </select>
 
-<label>وصف العيب (اختياري)</label>
+<label data-i18n="description_label">وصف العيب (اختياري)</label>
 <textarea id="descriptionInput" placeholder="اكتب تفاصيل إضافية عن العيب..."></textarea>
 
-<button type="submit" class="btn-submit" id="submitBtn">✅ تسجيل العيب</button>
+<button type="submit" class="btn-submit" id="submitBtn" data-i18n="submit_defect_btn">✅ تسجيل العيب</button>
 </form>
 <div id="successMsg" class="msg msg-success">✅ تم تسجيل العيب بنجاح!</div>
 <div id="errorMsg" class="msg msg-error"></div>
@@ -97,6 +100,8 @@ let currentUser = null;
 let currentScanner = null;
 
 async function init() {
+  applyTranslations();
+  renderLangToggle('langToggleWrap');
   const auth = await requireAuth();
   if (!auth) return;
   currentUser = auth.user;
