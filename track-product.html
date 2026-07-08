@@ -166,11 +166,22 @@ async function searchProduct() {
   document.getElementById('printMeta').textContent =
     'السيريال: ' + serial + ' | تاريخ الطباعة: ' + formatDate(new Date().toISOString()) + ' | بواسطة: ' + (window.currentUserEmail || '-');
 
-  const { data, error } = await sbClient
-    .from('defects')
-    .select('*, stages(name)')
-    .eq('serial_number', serial)
-    .order('created_at', { ascending: false });
+  let data, error;
+  try {
+    const result = await sbClient
+      .from('defects')
+      .select('*, stages(name)')
+      .eq('serial_number', serial)
+      .order('created_at', { ascending: false });
+    data = result.data;
+    error = result.error;
+    if (error) throw error;
+  } catch (err) {
+    // مفيش نت - استخدم النسخة المحفوظة محليًا وفلترها بنفسنا
+    const cached = getCachedAllDefects();
+    data = cached.filter(d => d.serial_number === serial);
+    error = null;
+  }
 
   if (error) {
     timelineContainer.innerHTML = '<div class="empty-note">❌ حدث خطأ أثناء البحث</div>';
