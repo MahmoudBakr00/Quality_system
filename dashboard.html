@@ -153,6 +153,10 @@ tr.row-clickable { cursor: pointer; }
   <label style="color:#94a3b8; font-size:12px; display:block; margin-bottom:6px;">اسم الشخص الذي اعتمد التجاوز</label>
   <input type="text" id="waivedByInput" placeholder="اكتب الاسم" style="width:100%; padding:8px 10px; border:none; border-radius:6px; background:#334155; color:#f1f5f9;" />
 </div>
+<div class="waived-by-wrap" id="otherReasonWrap">
+  <label style="color:#94a3b8; font-size:12px; display:block; margin-bottom:6px;">اكتب السبب</label>
+  <input type="text" id="otherReasonInput" placeholder="اكتب السبب هنا" style="width:100%; padding:8px 10px; border:none; border-radius:6px; background:#334155; color:#f1f5f9;" />
+</div>
 <button class="confirm-review-btn" id="confirmReviewBtn">تأكيد</button>
 <button class="modal-close" id="reviewModalClose">إلغاء</button>
 </div>
@@ -329,10 +333,13 @@ function reviewDefect(defectId, action) {
 
   document.getElementById('waivedByWrap').classList.remove('open');
   document.getElementById('waivedByInput').value = '';
+  document.getElementById('otherReasonWrap').classList.remove('open');
+  document.getElementById('otherReasonInput').value = '';
 
   container.querySelectorAll('input[name="reviewOption"]').forEach(radio => {
     radio.addEventListener('change', () => {
       document.getElementById('waivedByWrap').classList.toggle('open', radio.value === 'waived' && radio.checked);
+      document.getElementById('otherReasonWrap').classList.toggle('open', (radio.value === 'other_approve' || radio.value === 'other_reject') && radio.checked);
     });
   });
 
@@ -355,9 +362,16 @@ document.getElementById('confirmReviewBtn').addEventListener('click', async () =
     if (!waivedBy) { alert('⚠️ اكتب اسم الشخص الذي اعتمد التجاوز'); return; }
   }
 
+  let otherReason = null;
+  if (actionTaken === 'other_approve' || actionTaken === 'other_reject') {
+    otherReason = document.getElementById('otherReasonInput').value.trim();
+    if (!otherReason) { alert('⚠️ اكتب السبب'); return; }
+  }
+
   const actionLabels = { repair: 'إصلاح', part_change: 'تغيير الجزء', waived: 'مقبولة بتجاوز', other_approve: 'أخرى', rework: 'تغيير', scrap: 'سكراب', other_reject: 'أخرى' };
   let reviewNote = actionLabels[actionTaken] || actionTaken;
   if (actionTaken === 'waived') reviewNote += ' - اعتمدها: ' + waivedBy;
+  if (actionTaken === 'other_approve' || actionTaken === 'other_reject') reviewNote += ' - ' + otherReason;
 
   const { error } = await sbClient.from('defects').update({
     status: pendingAction,
