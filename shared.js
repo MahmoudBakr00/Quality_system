@@ -392,6 +392,39 @@ function getRememberedEmail() {
   return localStorage.getItem(REMEMBERED_EMAIL_KEY) || '';
 }
 
+// =========================================================
+// لوحة تشخيص بسيطة تظهر في الصفحة نفسها (مفيدة على الموبايل حيث
+// أدوات المطور صعبة الوصول)
+// =========================================================
+function renderDiagnosticsPanel(containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  function update() {
+    const stages = getCachedStages();
+    const allDefectsCached = getCachedAllDefects();
+    const pendingCount = getPendingCount();
+    const lastSync = getLastSyncTime();
+    const online = navigator.onLine;
+
+    container.innerHTML = `
+      <div style="background:#0f172a; border:1px solid #334155; border-radius:10px; padding:14px; font-size:12px; color:#cbd5e1; direction:ltr; text-align:left;">
+        <div style="font-weight:bold; color:#60a5fa; margin-bottom:8px; direction:rtl; text-align:right;">🔧 لوحة التشخيص</div>
+        <div>الاتصال بالنت (navigator.onLine): <b style="color:${online ? '#4ade80' : '#f87171'}">${online ? 'متصل ✅' : 'غير متصل ❌'}</b></div>
+        <div>عدد المحطات المحفوظة محليًا: <b>${stages.length}</b></div>
+        <div>عدد العيوب المحفوظة محليًا (نسخة كاملة): <b>${allDefectsCached.length}</b></div>
+        <div>عدد العيوب في انتظار الرفع: <b>${pendingCount}</b></div>
+        <div>آخر مزامنة شاملة ناجحة: <b>${lastSync ? formatDate(lastSync) : 'لم تتم أبدًا'}</b></div>
+      </div>
+    `;
+  }
+
+  update();
+  window.addEventListener('online', update);
+  window.addEventListener('offline', update);
+  setInterval(update, 3000);
+}
+
 // شارة صغيرة قابلة لإعادة الاستخدام توضح عدد العيوب المنتظرة + زر مزامنة يدوي
 function renderPendingBadge(containerId) {
   const container = document.getElementById(containerId);
