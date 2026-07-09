@@ -140,7 +140,8 @@ tr.row-clickable { cursor: pointer; }
   <option value="approved" data-i18n="status_approved">معتمد</option>
   <option value="rejected" data-i18n="status_rejected">مرفوض</option>
 </select>
-<input type="text" id="filterSerial" data-i18n-placeholder="col_serial" placeholder="بحث بالسيريال / الجوب أوردر" />
+<input type="text" id="filterSerial" data-i18n-placeholder="col_serial" placeholder="بحث بالسيريال" />
+<input type="text" id="filterJobOrder" placeholder="بحث بالجوب أوردر" />
 <input type="text" id="filterDefectType" placeholder="بحث بنوع العيب" />
 <input type="text" id="filterTechnician" placeholder="بحث بالفني" />
 <input type="text" id="filterLine" placeholder="خط الإنتاج" />
@@ -289,6 +290,7 @@ async function loadDefects() {
   const stageId = document.getElementById('filterStage').value;
   const status = document.getElementById('filterStatus').value;
   const search = document.getElementById('filterSerial').value.trim();
+  const jobOrderSearch = document.getElementById('filterJobOrder').value.trim();
   const defectTypeSearch = document.getElementById('filterDefectType').value.trim();
   const technicianSearch = document.getElementById('filterTechnician').value.trim();
   const lineSearch = document.getElementById('filterLine').value.trim();
@@ -298,7 +300,8 @@ async function loadDefects() {
   let query = sbClient.from('defects').select('*, stages(name, line_no)').order('created_at', { ascending: false });
   if (stageId) query = query.eq('stage_id', stageId);
   if (status) query = query.eq('status', status);
-  if (search) query = query.or(`serial_number.ilike.%${search}%,job_order.ilike.%${search}%`);
+  if (search) query = query.ilike('serial_number', `%${search}%`);
+  if (jobOrderSearch) query = query.ilike('job_order', `%${jobOrderSearch}%`);
   if (defectTypeSearch) query = query.ilike('defect_type_name', `%${defectTypeSearch}%`);
   if (technicianSearch) query = query.ilike('technician_email', `%${technicianSearch}%`);
   if (dateFrom) query = query.gte('created_at', dateFrom + 'T00:00:00');
@@ -317,8 +320,10 @@ async function loadDefects() {
     if (stageId) cached = cached.filter(d => d.stage_id === stageId);
     if (status) cached = cached.filter(d => d.status === status);
     if (search) cached = cached.filter(d =>
-      (d.serial_number || '').toLowerCase().includes(search.toLowerCase()) ||
-      (d.job_order || '').toLowerCase().includes(search.toLowerCase())
+      (d.serial_number || '').toLowerCase().includes(search.toLowerCase())
+    );
+    if (jobOrderSearch) cached = cached.filter(d =>
+      (d.job_order || '').toLowerCase().includes(jobOrderSearch.toLowerCase())
     );
     if (defectTypeSearch) cached = cached.filter(d =>
       (d.defect_type_name || '').toLowerCase().includes(defectTypeSearch.toLowerCase())
@@ -334,7 +339,7 @@ async function loadDefects() {
     allDefects = cached;
   }
 
-  renderSerialHistoryPanel(search);
+  renderSerialHistoryPanel(search || jobOrderSearch);
 
   renderTable();
 }
@@ -634,6 +639,7 @@ document.getElementById('confirmReviewBtn').addEventListener('click', async () =
 // ============ فلترة ============
 document.getElementById('applyFilter').addEventListener('click', loadDefects);
 document.getElementById('filterSerial').addEventListener('keypress', (e) => { if (e.key === 'Enter') loadDefects(); });
+document.getElementById('filterJobOrder').addEventListener('keypress', (e) => { if (e.key === 'Enter') loadDefects(); });
 document.getElementById('filterDefectType').addEventListener('keypress', (e) => { if (e.key === 'Enter') loadDefects(); });
 document.getElementById('filterTechnician').addEventListener('keypress', (e) => { if (e.key === 'Enter') loadDefects(); });
 document.getElementById('filterLine').addEventListener('keypress', (e) => { if (e.key === 'Enter') loadDefects(); });
@@ -641,6 +647,7 @@ document.getElementById('resetFilter').addEventListener('click', () => {
   document.getElementById('filterStage').value = '';
   document.getElementById('filterStatus').value = '';
   document.getElementById('filterSerial').value = '';
+  document.getElementById('filterJobOrder').value = '';
   document.getElementById('filterDefectType').value = '';
   document.getElementById('filterTechnician').value = '';
   document.getElementById('filterLine').value = '';
