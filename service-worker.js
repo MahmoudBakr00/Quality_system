@@ -1,5 +1,5 @@
 // =========================================================
-// Service Worker - نظام تسجيل ومتابعة العيوب (نسخة مصححة v2)
+// Service Worker - نظام تسجيل ومتابعة العيوب (نسخة مصححة v3)
 // الاستراتيجية:
 // - صفحات HTML و shared.js: Network-First (يفضل ياخد أحدث نسخة أونلاين،
 //   ويرجع للكاش بس لو مفيش نت خالص) - عشان أي تحديث بترفعه يظهر فورًا.
@@ -7,7 +7,7 @@
 // - طلبات Supabase (بيانات حية): بتتجاهل تمامًا، بتروح للنت مباشرة.
 // =========================================================
 
-const CACHE_NAME = 'defect-system-cache-v2';
+const CACHE_NAME = 'defect-system-cache-v4';
 
 const PRECACHE_URLS = [
   './',
@@ -19,6 +19,7 @@ const PRECACHE_URLS = [
   'admin-users.html',
   'change-password.html',
   'reset-password.html',
+  'inspection-check.html',
   'shared.js',
   'manifest.json',
 ];
@@ -27,6 +28,7 @@ const CDN_LIBRARY_URLS = [
   'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js',
   'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js',
   'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',
+  'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js',
 ];
 
 self.addEventListener('install', (event) => {
