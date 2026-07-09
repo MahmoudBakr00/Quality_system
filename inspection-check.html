@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<link rel="manifest" href="manifest.json" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>فحص المطابقة - نظام تسجيل العيوب</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+body { background: #0f172a; padding: 20px; color: #f1f5f9; }
+.container { max-width: 600px; margin: 0 auto; }
+.sub-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; background: #1e293b; padding: 14px 20px; border-radius: 12px; }
+.back-link { color: #93c5fd; text-decoration: none; font-weight: 600; font-size: 14px; }
+.back-link:hover { text-decoration: underline; }
+
+.view { background: #1e293b; border-radius: 16px; padding: 28px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
+.view h1 { text-align: center; color: #60a5fa; margin-bottom: 24px; font-size: 22px; }
+
+label { color: #cbd5e1; display: block; margin-bottom: 6px; font-weight: 600; font-size: 14px; }
+select { width: 100%; padding: 12px 14px; margin-bottom: 18px; border: none; border-radius: 8px; background: #334155; color: #f1f5f9; font-size: 15px; }
+select:focus { outline: 2px solid #3b82f6; }
+
+.scan-row { display: flex; gap: 10px; margin-bottom: 8px; }
+.scan-row input { flex: 1; padding: 12px 14px; border: none; border-radius: 8px; background: #334155; color: #f1f5f9; font-size: 15px; }
+.scan-row input:focus { outline: 2px solid #3b82f6; }
+.scan-btn { border: none; padding: 0 16px; border-radius: 8px; cursor: pointer; font-weight: bold; white-space: nowrap; color: white; }
+.scan-btn.serial-scan { background: #8b5cf6; }
+.scan-btn.serial-scan:hover { background: #7c3aed; }
+.scan-btn.link-scan { background: #06b6d4; }
+.scan-btn.link-scan:hover { background: #0891b2; }
+
+.job-order-preview { background: #0f172a; border-radius: 8px; padding: 10px 14px; margin: 6px 0 18px; color: #fbbf24; font-size: 13px; font-weight: bold; }
+
+.btn-check { width: 100%; padding: 14px; background: #3b82f6; color: white; border: none; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer; margin-top: 6px; }
+.btn-check:hover { background: #2563eb; }
+.btn-check:disabled { opacity: 0.5; cursor: not-allowed; }
+
+#scannerModal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 100; align-items: center; justify-content: center; }
+#scannerModal.open { display: flex; }
+.scanner-box { background: #1e293b; border-radius: 14px; padding: 20px; width: 90%; max-width: 400px; }
+.scanner-box h3 { color: #60a5fa; margin-bottom: 14px; text-align: center; }
+#scannerContainer { width: 100%; border-radius: 10px; overflow: hidden; }
+.scanner-close { width: 100%; margin-top: 14px; padding: 10px; background: #64748b; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
+
+/* شاشة النتيجة الكاملة */
+.result-overlay { display: none; position: fixed; inset: 0; z-index: 200; align-items: center; justify-content: center; flex-direction: column; text-align: center; padding: 20px; }
+.result-overlay.show { display: flex; }
+.result-overlay.ok { background: rgba(34,197,94,0.95); }
+.result-overlay.ng { background: rgba(239,68,68,0.95); }
+.result-overlay.not_found { background: rgba(251,191,36,0.95); }
+.result-overlay .result-icon { font-size: 5rem; margin-bottom: 16px; }
+.result-overlay .result-text { font-size: 2.5rem; font-weight: bold; color: white; margin-bottom: 24px; }
+.result-overlay .result-detail { color: white; font-size: 14px; margin-bottom: 24px; direction: ltr; }
+.result-overlay button { background: white; color: #333; border: none; padding: 14px 36px; border-radius: 50px; font-size: 18px; font-weight: bold; cursor: pointer; }
+
+.recent-log { margin-top: 20px; background: #1e293b; border-radius: 14px; padding: 20px; }
+.recent-log h3 { color: #60a5fa; font-size: 15px; margin-bottom: 12px; }
+.log-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #334155; font-size: 12px; }
+.log-row:last-child { border-bottom: none; }
+.log-badge { padding: 3px 10px; border-radius: 12px; font-weight: bold; font-size: 11px; }
+.log-badge.ok { background: #22c55e; color: white; }
+.log-badge.ng { background: #ef4444; color: white; }
+.log-badge.not_found { background: #fbbf24; color: #78350f; }
+</style>
+</head>
+<body>
+<div class="container">
+<div class="sub-header">
+<a href="home.html" class="back-link">⬅ الرئيسية</a>
+<div style="display:flex; align-items:center; gap:10px;">
+<div id="langToggleWrap"></div>
+<span id="userEmail" style="color:#94a3b8; font-size:13px;"></span>
+</div>
+</div>
+
+<div class="view">
+<h1>🔍 فحص المطابقة</h1>
+
+<label>محطة الفحص</label>
+<select id="stageSelect" required>
+  <option value="">⏳ جاري تحميل المحطات...</option>
+</select>
+
+<label>سيريال المنتج</label>
+<div class="scan-row">
+  <input type="text" id="serialInput" placeholder="اكتب السيريال أو استخدم السكانر" />
+  <button type="button" class="scan-btn serial-scan" id="openSerialScannerBtn">📷 سكان</button>
+</div>
+<div class="job-order-preview" id="jobOrderPreview" style="display:none;"></div>
+
+<label>لينك الكيو آر كود</label>
+<div class="scan-row">
+  <input type="text" id="linkInput" placeholder="اكتب اللينك أو استخدم سكانر QR" />
+  <button type="button" class="scan-btn link-scan" id="openLinkScannerBtn">📷 QR</button>
+</div>
+
+<button class="btn-check" id="checkBtn">🔎 تحقق من المطابقة</button>
+</div>
+
+<div class="recent-log">
+<h3>📋 آخر عمليات الفحص</h3>
+<div id="recentLogList"><div style="color:#64748b; font-size:12px;">لا توجد عمليات بعد</div></div>
+</div>
+</div>
+
+<div id="scannerModal">
+<div class="scanner-box">
+<h3 id="scannerTitle">📷 وجّه الكاميرا</h3>
+<div id="scannerContainer"></div>
+<button class="scanner-close" id="closeScannerBtn">إغلاق</button>
+</div>
+</div>
+
+<div class="result-overlay" id="resultOverlay">
+<div class="result-icon" id="resultIcon">✔</div>
+<div class="result-text" id="resultText">OK</div>
+<div class="result-detail" id="resultDetail"></div>
+<button id="resultCloseBtn">موافق</button>
+</div>
+
+<script src="shared.js"></script>
+<script>
+let currentUser = null;
+let currentScanner = null;
+
+async function init() {
+  applyTranslations();
+  renderLangToggle('langToggleWrap');
+  const auth = await requireAuth();
+  if (!auth) return;
+  currentUser = auth.user;
+  document.getElementById('userEmail').textContent = auth.user.email;
+  loadStages();
+  loadRecentLogs();
+}
+init();
+
+async function loadStages() {
+  const select = document.getElementById('stageSelect');
+  const { data, error } = await sbClient.from('stages').select('*').order('name');
+  if (error || !data || data.length === 0) {
+    select.innerHTML = '<option value="">📭 لا توجد محطات مضافة بعد</option>';
+    return;
+  }
+  select.innerHTML = '<option value="">-- اختر محطة الفحص --</option>';
+  data.forEach(s => {
+    const o = document.createElement('option');
+    o.value = s.id;
+    o.textContent = s.name + (s.line_no ? ' (خط ' + s.line_no + ')' : '');
+    select.appendChild(o);
+  });
+}
+
+// معاينة الجوب أوردر لحظيًا
+document.getElementById('serialInput').addEventListener('input', (e) => {
+  const preview = document.getElementById('jobOrderPreview');
+  const jo = extractJobOrder(e.target.value.trim());
+  if (jo) {
+    preview.textContent = '🔢 الجوب أوردر المستخرج: ' + jo;
+    preview.style.display = 'block';
+  } else {
+    preview.style.display = 'none';
+  }
+});
+
+// ============ سكان السيريال (باركود) ============
+const scannerModal = document.getElementById('scannerModal');
+
+document.getElementById('openSerialScannerBtn').addEventListener('click', () => {
+  document.getElementById('scannerTitle').textContent = '📷 وجّه الكاميرا نحو باركود السيريال';
+  scannerModal.classList.add('open');
+  currentScanner = startBarcodeScanner('scannerContainer', (decodedText) => {
+    document.getElementById('serialInput').value = decodedText;
+    document.getElementById('serialInput').dispatchEvent(new Event('input'));
+    closeScannerModal();
+  }, (err) => console.error('Scanner error:', err));
+});
+
+// ============ سكان اللينك (QR) ============
+document.getElementById('openLinkScannerBtn').addEventListener('click', () => {
+  document.getElementById('scannerTitle').textContent = '📷 وجّه الكاميرا نحو الـ QR Code';
+  scannerModal.classList.add('open');
+  currentScanner = startQrScanner('scannerContainer', (decodedText) => {
+    document.getElementById('linkInput').value = decodedText;
+    closeScannerModal();
+  }, (err) => console.error('Scanner error:', err));
+});
+
+async function closeScannerModal() {
+  scannerModal.classList.remove('open');
+  if (currentScanner) {
+    await currentScanner.stop();
+    currentScanner = null;
+  }
+}
+document.getElementById('closeScannerBtn').addEventListener('click', closeScannerModal);
+
+// ============ التحقق من المطابقة ============
+document.getElementById('checkBtn').addEventListener('click', async () => {
+  const stageId = document.getElementById('stageSelect').value;
+  const serial = document.getElementById('serialInput').value.trim();
+  const link = document.getElementById('linkInput').value.trim();
+
+  if (!stageId) { alert('⚠️ اختر محطة الفحص أولاً'); return; }
+  if (!serial) { alert('⚠️ اكتب أو امسح سيريال المنتج'); return; }
+  if (!link) { alert('⚠️ اكتب أو امسح لينك الـ QR'); return; }
+
+  const jobOrder = extractJobOrder(serial);
+  const btn = document.getElementById('checkBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ جاري التحقق...';
+
+  let result = 'not_found';
+  let expectedLink = null;
+
+  try {
+    const { data, error } = await sbClient
+      .from('reference_codes')
+      .select('*')
+      .eq('stage_id', stageId)
+      .eq('job_order', jobOrder)
+      .maybeSingle();
+
+    if (!error && data) {
+      expectedLink = data.expected_link;
+      result = (data.expected_link === link) ? 'ok' : 'ng';
+    } else {
+      result = 'not_found';
+    }
+  } catch (err) {
+    alert('❌ حدث خطأ أثناء التحقق: ' + err.message);
+    btn.disabled = false;
+    btn.textContent = '🔎 تحقق من المطابقة';
+    return;
+  }
+
+  showResult(result, jobOrder, link, expectedLink);
+
+  // تسجيل نتيجة الفحص في قاعدة البيانات
+  try {
+    await sbClient.from('inspection_logs').insert([{
+      stage_id: stageId,
+      serial_number: serial,
+      job_order: jobOrder,
+      scanned_link: link,
+      expected_link: expectedLink,
+      result,
+      technician_id: currentUser.id,
+      technician_email: currentUser.email,
+    }]);
+  } catch (err) {
+    console.warn('فشل تسجيل نتيجة الفحص:', err);
+  }
+
+  loadRecentLogs();
+  btn.disabled = false;
+  btn.textContent = '🔎 تحقق من المطابقة';
+});
+
+function showResult(result, jobOrder, scannedLink, expectedLink) {
+  const overlay = document.getElementById('resultOverlay');
+  const icon = document.getElementById('resultIcon');
+  const text = document.getElementById('resultText');
+  const detail = document.getElementById('resultDetail');
+
+  overlay.className = 'result-overlay show ' + result;
+
+  if (result === 'ok') {
+    icon.textContent = '✔';
+    text.textContent = 'OK - مطابق';
+  } else if (result === 'ng') {
+    icon.textContent = '✘';
+    text.textContent = 'NG - غير مطابق';
+  } else {
+    icon.textContent = '⚠';
+    text.textContent = 'غير موجود في القاعدة';
+  }
+
+  detail.innerHTML = `Job Order: ${jobOrder}<br>Scanned Link: ${scannedLink}<br>${expectedLink ? 'Expected Link: ' + expectedLink : ''}`;
+}
+
+document.getElementById('resultCloseBtn').addEventListener('click', () => {
+  document.getElementById('resultOverlay').classList.remove('show');
+  document.getElementById('serialInput').value = '';
+  document.getElementById('linkInput').value = '';
+  document.getElementById('jobOrderPreview').style.display = 'none';
+});
+
+// ============ آخر عمليات الفحص ============
+async function loadRecentLogs() {
+  const container = document.getElementById('recentLogList');
+  const { data, error } = await sbClient
+    .from('inspection_logs')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(10);
+
+  if (error || !data || data.length === 0) {
+    container.innerHTML = '<div style="color:#64748b; font-size:12px;">لا توجد عمليات بعد</div>';
+    return;
+  }
+
+  const resultText = { ok: 'OK', ng: 'NG', not_found: 'غير موجود' };
+  container.innerHTML = data.map(log => `
+    <div class="log-row">
+      <span>${log.job_order || '-'}</span>
+      <span class="log-badge ${log.result}">${resultText[log.result] || log.result}</span>
+      <span style="color:#64748b;">${formatDate(log.created_at)}</span>
+    </div>
+  `).join('');
+}
+</script>
+</body>
+</html>
