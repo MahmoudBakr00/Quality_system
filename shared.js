@@ -343,7 +343,7 @@ async function syncAllDataForOffline() {
     const [stagesRes, defectTypesRes, defectsRes] = await Promise.all([
       sbClient.from('stages').select('*').order('name'),
       sbClient.from('defect_types').select('*'),
-      sbClient.from('defects').select('*, stages(name)').order('created_at', { ascending: false }),
+      sbClient.from('defects').select('*, stages(name, line_no)').order('created_at', { ascending: false }),
     ]);
 
     if (!stagesRes.error) cacheStages(stagesRes.data);
