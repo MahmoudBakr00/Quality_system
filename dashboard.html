@@ -76,6 +76,12 @@ tr.row-clickable { cursor: pointer; }
 .small-btn:hover { background: #2563eb; }
 .defect-type-tag { display: inline-flex; align-items: center; gap: 4px; background: #1e293b; color: #cbd5e1; padding: 3px 8px; border-radius: 12px; font-size: 11px; margin: 3px 3px 0 0; }
 .defect-type-tag button { background: none; border: none; color: #f87171; cursor: pointer; font-size: 12px; }
+.defect-type-tag.selected { background: #7c2d2d; }
+.dt-checkbox { margin-left: 2px; }
+.bulk-delete-row { display: flex; gap: 8px; margin: 8px 0; }
+.bulk-delete-btn { background: #ef4444; color: white; border: none; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: bold; }
+.bulk-delete-btn:hover { background: #dc2626; }
+.station-checkbox { margin-left: 8px; }
 .station-detail { display: none; margin-top: 10px; border-top: 1px solid #475569; padding-top: 10px; }
 .station-detail.open { display: block; }
 
@@ -117,6 +123,8 @@ tr.row-clickable { cursor: pointer; }
 .excel-upload-row input[type="file"] { flex: 1; font-size: 11px; color: #94a3b8; }
 .excel-upload-btn { background: #22c55e; color: white; border: none; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: bold; white-space: nowrap; }
 .excel-upload-btn:hover { background: #16a34a; }
+.excel-ref-upload-btn { background: #8b5cf6; color: white; border: none; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 11px; font-weight: bold; white-space: normal; }
+.excel-ref-upload-btn:hover { background: #7c3aed; }
 </style>
 </head>
 <body>
@@ -237,6 +245,9 @@ tr.row-clickable { cursor: pointer; }
 <button class="small-btn" style="margin-top:10px; width:100%; padding:10px;" id="addStageBtn">➕ إضافة المحطة</button>
 </div>
 
+<div class="bulk-delete-row">
+  <button class="bulk-delete-btn" id="bulkDeleteStationsBtn">🗑 حذف المحطات المحددة</button>
+</div>
 <div id="stationsList"><div class="loading">⏳ جاري التحميل...</div></div>
 <button class="modal-close" id="stationsClose">إغلاق</button>
 </div>
@@ -275,6 +286,7 @@ document.getElementById('logoutBtn').addEventListener('click', logout);
 async function loadStagesFilter() {
   const { data } = await sbClient.from('stages').select('id, name').order('name');
   const select = document.getElementById('filterStage');
+  select.innerHTML = '<option value="" data-i18n="all_stations">كل المحطات</option>';
   (data || []).forEach(s => {
     const o = document.createElement('option');
     o.value = s.id; o.textContent = s.name;
@@ -725,6 +737,17 @@ document.getElementById('stationsBtn').addEventListener('click', () => {
 });
 document.getElementById('stationsClose').addEventListener('click', () => stationsModal.classList.remove('open'));
 
+document.getElementById('bulkDeleteStationsBtn').addEventListener('click', async () => {
+  const checkboxes = document.querySelectorAll('.station-checkbox:checked');
+  const ids = Array.from(checkboxes).map(cb => cb.dataset.stationId);
+  if (ids.length === 0) { alert('⚠️ اختر محطة واحدة على الأقل'); return; }
+  if (!confirm(`⚠️ هل أنت متأكد من حذف ${ids.length} محطة؟\n\nتحذير: حذف المحطة سيحذف معه كل العيوب المسجلة عليها نهائيًا ولا يمكن التراجع!`)) return;
+  const { error } = await sbClient.from('stages').delete().in('id', ids);
+  if (error) { alert('❌ فشل الحذف: ' + error.message); return; }
+  loadStationsList();
+  loadStagesFilter();
+});
+
 document.getElementById('newStageVisibleAll').addEventListener('change', (e) => {
   document.getElementById('newStageSupervisorsWrap').style.display = e.target.checked ? 'none' : 'block';
 });
@@ -788,24 +811,29 @@ async function loadStationsList() {
 
   const { data: assignments } = await sbClient.from('station_supervisors').select('stage_id, supervisor_id, profiles(email)');
   const { data: defectTypes } = await sbClient.from('defect_types').select('*');
+  const { data: referenceCodes } = await sbClient.from('reference_codes').select('*');
 
   container.innerHTML = '';
   stages.forEach(s => {
     const stageSupervisors = (assignments || []).filter(a => a.stage_id === s.id);
     const stageDefectTypes = (defectTypes || []).filter(dt => dt.stage_id === s.id);
+    const stageRefCodes = (referenceCodes || []).filter(rc => rc.stage_id === s.id);
 
     const div = document.createElement('div');
     div.className = 'station-item';
     div.innerHTML = `
       <div class="s-title">
-        <span>🏭 ${s.name} ${s.line_no ? '(خط ' + s.line_no + ')' : ''}</span>
+        <span><input type="checkbox" class="station-checkbox" data-station-id="${s.id}" />🏭 ${s.name} ${s.line_no ? '(خط ' + s.line_no + ')' : ''}</span>
         <button class="small-btn manage-station-btn" data-id="${s.id}">إدارة</button>
       </div>
       <div class="s-meta">${s.visible_to_all ? '👁 مرئية لكل المشرفين' : '🔒 مشرفين محددين: ' + (stageSupervisors.map(a => a.profiles?.email).join(', ') || 'لا يوجد')}</div>
       <div class="station-detail" id="detail-${s.id}">
         <label style="color:#94a3b8;font-size:12px;">أنواع العيوب في هذه المحطة:</label>
         <div id="defect-types-${s.id}">
-          ${stageDefectTypes.map(dt => `<span class="defect-type-tag">${dt.name} <button data-dt-id="${dt.id}" class="remove-dt-btn">×</button></span>`).join('') || '<span style="color:#64748b;font-size:12px;">لا يوجد</span>'}
+          ${stageDefectTypes.map(dt => `<span class="defect-type-tag"><input type="checkbox" class="dt-checkbox" data-dt-id="${dt.id}" /> ${dt.name} <button data-dt-id="${dt.id}" class="remove-dt-btn">×</button></span>`).join('') || '<span style="color:#64748b;font-size:12px;">لا يوجد</span>'}
+        </div>
+        <div class="bulk-delete-row">
+          <button class="bulk-delete-btn bulk-delete-dt-btn" data-stage-id="${s.id}">🗑 حذف أنواع العيوب المحددة</button>
         </div>
         <div style="display:flex; gap:6px; margin-top:8px;">
           <input type="text" placeholder="نوع عيب جديد" class="new-dt-input" style="flex:1; padding:6px 10px; border:none; border-radius:6px; background:#334155; color:#f1f5f9; font-size:12px;" />
@@ -814,6 +842,31 @@ async function loadStationsList() {
         <div class="excel-upload-row">
           <input type="file" accept=".xlsx,.xls,.csv" class="excel-dt-input" data-stage-id="${s.id}" />
           <button class="excel-upload-btn" data-stage-id="${s.id}">📊 رفع من إكسيل</button>
+        </div>
+
+        <hr style="border-color:#475569; margin:14px 0;" />
+        <label style="color:#94a3b8;font-size:12px;">🔍 قاعدة بيانات مطابقة الفحص (جوب أوردر ← لينك متوقع):</label>
+                <div id="ref-codes-${s.id}" style="max-height:120px; overflow-y:auto; margin:8px 0;">
+          ${stageRefCodes.map(rc => `
+            <div style="display:flex; align-items:center; gap:6px; font-size:11px; color:#cbd5e1; padding:2px 0;">
+              <input type="checkbox" class="ref-checkbox" data-ref-id="${rc.id}" />
+              <span style="font-weight:bold;">${rc.job_order}</span>
+              <span style="color:#64748b;">→</span>
+              <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:150px;">${rc.expected_link}</span>
+            </div>
+          `).join('') || '<span style="color:#64748b;font-size:12px;">لا يوجد بيانات مطابقة بعد</span>'}
+        </div>
+        <div class="bulk-delete-row">
+          <button class="bulk-delete-btn bulk-delete-ref-btn" data-stage-id="${s.id}">🗑 حذف المحدد</button>
+        </div>
+        <div style="display:flex; gap:6px; margin-top:8px;">
+          <input type="text" placeholder="جوب أوردر" class="new-ref-joborder" style="flex:1; padding:6px 10px; border:none; border-radius:6px; background:#334155; color:#f1f5f9; font-size:12px;" />
+          <input type="text" placeholder="اللينك المتوقع" class="new-ref-link" style="flex:2; padding:6px 10px; border:none; border-radius:6px; background:#334155; color:#f1f5f9; font-size:12px;" />
+          <button class="small-btn add-ref-btn" data-stage-id="${s.id}">➕</button>
+        </div>
+        <div class="excel-upload-row">
+          <input type="file" accept=".xlsx,.xls,.csv" class="excel-ref-input" data-stage-id="${s.id}" />
+          <button class="excel-ref-upload-btn" data-stage-id="${s.id}">📊 رفع إكسيل (عمود A=جوب أوردر, B=لينك)</button>
         </div>
       </div>
     `;
@@ -844,6 +897,20 @@ async function loadStationsList() {
     });
   });
 
+  // حذف جماعي لأنواع العيوب المحددة داخل محطة معينة
+  container.querySelectorAll('.bulk-delete-dt-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const stageId = btn.dataset.stageId;
+      const checkboxes = container.querySelectorAll(`#defect-types-${stageId} .dt-checkbox:checked`);
+      const ids = Array.from(checkboxes).map(cb => cb.dataset.dtId);
+      if (ids.length === 0) { alert('⚠️ اختر نوع عيب واحد على الأقل'); return; }
+      if (!confirm(`هل أنت متأكد من حذف ${ids.length} نوع عيب؟`)) return;
+      const { error } = await sbClient.from('defect_types').delete().in('id', ids);
+      if (error) { alert('❌ فشل الحذف: ' + error.message); return; }
+      loadStationsList();
+    });
+  });
+
   container.querySelectorAll('.excel-upload-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const fileInput = container.querySelector(`.excel-dt-input[data-stage-id="${btn.dataset.stageId}"]`);
@@ -852,6 +919,75 @@ async function loadStationsList() {
       handleExcelUpload(file, btn.dataset.stageId);
     });
   });
+
+  // ============ قاعدة بيانات المطابقة (جوب أوردر ← لينك) ============
+  container.querySelectorAll('.add-ref-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const wrap = btn.parentElement;
+      const jobOrder = wrap.querySelector('.new-ref-joborder').value.trim();
+      const link = wrap.querySelector('.new-ref-link').value.trim();
+      if (!jobOrder || !link) { alert('⚠️ اكتب الجوب أوردر واللينك'); return; }
+      const { error } = await sbClient.from('reference_codes').upsert(
+        [{ stage_id: btn.dataset.stageId, job_order: jobOrder, expected_link: link }],
+        { onConflict: 'stage_id,job_order' }
+      );
+      if (error) { alert('❌ ' + error.message); return; }
+      loadStationsList();
+    });
+  });
+
+  container.querySelectorAll('.bulk-delete-ref-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const stageId = btn.dataset.stageId;
+      const checkboxes = container.querySelectorAll(`#ref-codes-${stageId} .ref-checkbox:checked`);
+      const ids = Array.from(checkboxes).map(cb => cb.dataset.refId);
+      if (ids.length === 0) { alert('⚠️ اختر عنصر واحد على الأقل'); return; }
+      if (!confirm(`هل أنت متأكد من حذف ${ids.length} عنصر؟`)) return;
+      const { error } = await sbClient.from('reference_codes').delete().in('id', ids);
+      if (error) { alert('❌ فشل الحذف: ' + error.message); return; }
+      loadStationsList();
+    });
+  });
+
+  container.querySelectorAll('.excel-ref-upload-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const fileInput = container.querySelector(`.excel-ref-input[data-stage-id="${btn.dataset.stageId}"]`);
+      const file = fileInput.files[0];
+      if (!file) { alert('⚠️ اختر ملف إكسيل أولاً'); return; }
+      handleReferenceExcelUpload(file, btn.dataset.stageId);
+    });
+  });
+}
+
+async function handleReferenceExcelUpload(file, stageId) {
+  try {
+    const data = await file.arrayBuffer();
+    const workbook = XLSX.read(data, { type: 'array' });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+    const pairs = rows
+      .map(r => ({
+        jobOrder: (r && r[0] !== undefined && r[0] !== null) ? String(r[0]).trim() : '',
+        link: (r && r[1] !== undefined && r[1] !== null) ? String(r[1]).trim() : '',
+      }))
+      .filter(p => p.jobOrder !== '' && p.link !== '');
+
+    if (pairs.length === 0) {
+      alert('⚠️ لم يتم العثور على بيانات صالحة (عمود A = جوب أوردر, عمود B = لينك)');
+      return;
+    }
+
+    const rowsToInsert = pairs.map(p => ({ stage_id: stageId, job_order: p.jobOrder, expected_link: p.link }));
+    const { error } = await sbClient.from('reference_codes').upsert(rowsToInsert, { onConflict: 'stage_id,job_order' });
+    if (error) throw error;
+
+    alert(`✅ تمت إضافة ${pairs.length} سجل مطابقة من الملف بنجاح`);
+    loadStationsList();
+  } catch (err) {
+    alert('❌ فشل قراءة الملف: ' + err.message);
+    console.error(err);
+  }
 }
 
 async function handleExcelUpload(file, stageId) {
