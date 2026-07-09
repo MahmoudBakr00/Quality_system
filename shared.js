@@ -173,25 +173,14 @@ function extractJobOrder(serial) {
 }
 
 // =========================================================
-// سكان الباركود بالكاميرا (باركود عادي بس، مش QR)
+// سكان عام (باركود و/أو QR حسب الصيغ المطلوبة)
 // containerId: عنصر div هيظهر فيه الفيديو
-// onResult: callback(decodedText) بيتنفذ لما يلاقي باركود
+// formats: مصفوفة Html5QrcodeSupportedFormats المطلوبة
+// onResult: callback(decodedText) بيتنفذ لما يلاقي كود
 // بترجع كائن فيه دالة stop() لإيقاف السكانر
 // =========================================================
-function startBarcodeScanner(containerId, onResult, onError) {
-  const formatsToSupport = [
-    Html5QrcodeSupportedFormats.CODE_128,
-    Html5QrcodeSupportedFormats.CODE_39,
-    Html5QrcodeSupportedFormats.CODE_93,
-    Html5QrcodeSupportedFormats.CODABAR,
-    Html5QrcodeSupportedFormats.EAN_13,
-    Html5QrcodeSupportedFormats.EAN_8,
-    Html5QrcodeSupportedFormats.ITF,
-    Html5QrcodeSupportedFormats.UPC_A,
-    Html5QrcodeSupportedFormats.UPC_E,
-  ];
-
-  const html5QrCode = new Html5Qrcode(containerId, { formatsToSupport, verbose: false });
+function startScanner(containerId, formats, onResult, onError) {
+  const html5QrCode = new Html5Qrcode(containerId, { formatsToSupport: formats, verbose: false });
   let stopped = false;
 
   html5QrCode.start(
@@ -203,7 +192,7 @@ function startBarcodeScanner(containerId, onResult, onError) {
       }
     },
     (errorMessage) => {
-      // بيتنادى باستمرار لو مفيش باركود في الفريم الحالي، تجاهل عادي
+      // بيتنادى باستمرار لو مفيش كود في الفريم الحالي، تجاهل عادي
     }
   ).catch((err) => {
     if (onError) onError(err);
@@ -220,6 +209,27 @@ function startBarcodeScanner(containerId, onResult, onError) {
       }
     }
   };
+}
+
+// سكان الباركود بالكاميرا (باركود عادي بس، مش QR) - للاستخدامات القديمة
+function startBarcodeScanner(containerId, onResult, onError) {
+  const formatsToSupport = [
+    Html5QrcodeSupportedFormats.CODE_128,
+    Html5QrcodeSupportedFormats.CODE_39,
+    Html5QrcodeSupportedFormats.CODE_93,
+    Html5QrcodeSupportedFormats.CODABAR,
+    Html5QrcodeSupportedFormats.EAN_13,
+    Html5QrcodeSupportedFormats.EAN_8,
+    Html5QrcodeSupportedFormats.ITF,
+    Html5QrcodeSupportedFormats.UPC_A,
+    Html5QrcodeSupportedFormats.UPC_E,
+  ];
+  return startScanner(containerId, formatsToSupport, onResult, onError);
+}
+
+// سكان QR Code بس (للينكات في مرحلة الفحص الجديدة)
+function startQrScanner(containerId, onResult, onError) {
+  return startScanner(containerId, [Html5QrcodeSupportedFormats.QR_CODE], onResult, onError);
 }
 
 // =========================================================
@@ -407,11 +417,18 @@ function renderDiagnosticsPanel(containerId) {
     const lastSync = getLastSyncTime();
     const online = navigator.onLine;
 
+    let defectTypesCount = 0;
+    try {
+      const grouped = JSON.parse(localStorage.getItem(CACHE_DEFECT_TYPES_KEY) || '{}');
+      defectTypesCount = Object.values(grouped).reduce((sum, arr) => sum + (arr ? arr.length : 0), 0);
+    } catch (e) { defectTypesCount = 0; }
+
     container.innerHTML = `
       <div style="background:#0f172a; border:1px solid #334155; border-radius:10px; padding:14px; font-size:12px; color:#cbd5e1; direction:ltr; text-align:left;">
         <div style="font-weight:bold; color:#60a5fa; margin-bottom:8px; direction:rtl; text-align:right;">🔧 لوحة التشخيص</div>
         <div>الاتصال بالنت (navigator.onLine): <b style="color:${online ? '#4ade80' : '#f87171'}">${online ? 'متصل ✅' : 'غير متصل ❌'}</b></div>
         <div>عدد المحطات المحفوظة محليًا: <b>${stages.length}</b></div>
+        <div>عدد أنواع العيوب المحفوظة محليًا (كل المحطات): <b>${defectTypesCount}</b></div>
         <div>عدد العيوب المحفوظة محليًا (نسخة كاملة): <b>${allDefectsCached.length}</b></div>
         <div>عدد العيوب في انتظار الرفع: <b>${pendingCount}</b></div>
         <div>آخر مزامنة شاملة ناجحة: <b>${lastSync ? formatDate(lastSync) : 'لم تتم أبدًا'}</b></div>
@@ -460,12 +477,16 @@ window.addEventListener('online', () => {
 });
 
 // =========================================================
-// ملحوظة: تم إلغاء استخدام Service Worker (كان بيسبب مشاكل تحميل/ريفريش).
-// نظام الطابور المحلي (Offline Queue) فوق شغال بشكل مستقل تمامًا
-// وهو الحل الفعلي لمشكلة التسجيل بدون نت.
+// تسجيل Service Worker (نسخة v3 مصححة - Network-First للصفحات)
+// عشان الموقع يفتح ويتنقل بين صفحاته حتى بدون نت بعد أول زيارة ناجحة.
+// ملحوظة: لو جهازك سجّل نسخة قديمة معطوبة من قبل، لازم تعمل
+// Unregister + Clear site data يدويًا مرة واحدة الأول (من Developer Tools)
+// عشان النسخة الجديدة دي تسجل بدل القديمة.
 // =========================================================
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.getRegistrations().then((registrations) => {
-    registrations.forEach((registration) => registration.unregister());
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('service-worker.js').catch((err) => {
+      console.warn('فشل تسجيل Service Worker:', err);
+    });
   });
 }
