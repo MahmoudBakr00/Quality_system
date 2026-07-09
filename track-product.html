@@ -170,7 +170,7 @@ async function searchProduct() {
   try {
     const result = await sbClient
       .from('defects')
-      .select('*, stages(name)')
+      .select('*, stages(name, line_no)')
       .eq('serial_number', serial)
       .order('created_at', { ascending: false });
     data = result.data;
