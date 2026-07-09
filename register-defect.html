@@ -57,6 +57,7 @@ textarea { resize: vertical; min-height: 80px; }
 </div>
 
 <div id="pendingBadgeWrap"></div>
+<div id="diagnosticsWrap" style="margin-bottom:16px;"></div>
 
 <div class="view">
 <h1 data-i18n="register_defect_title">🔍 تسجيل عيب جديد</h1>
@@ -106,6 +107,7 @@ async function init() {
   applyTranslations();
   renderLangToggle('langToggleWrap');
   renderPendingBadge('pendingBadgeWrap');
+  renderDiagnosticsPanel('diagnosticsWrap');
   const auth = await requireAuth();
   if (!auth) return;
   currentUser = auth.user;
