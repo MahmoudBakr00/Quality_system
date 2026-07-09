@@ -6,6 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>الداشبورد - نظام تسجيل العيوب</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
@@ -78,6 +79,15 @@ tr.row-clickable { cursor: pointer; }
 .station-detail { display: none; margin-top: 10px; border-top: 1px solid #475569; padding-top: 10px; }
 .station-detail.open { display: block; }
 
+/* باريتو */
+.pareto-panel { background: #1e293b; border-radius: 14px; padding: 24px; margin-bottom: 20px; }
+.pareto-panel h2 { color: #60a5fa; margin-bottom: 16px; font-size: 17px; }
+.pareto-controls { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
+.pareto-controls label { color: #94a3b8; font-size: 13px; }
+.pareto-controls select { padding: 8px 14px; border: none; border-radius: 6px; background: #334155; color: #f1f5f9; font-size: 13px; }
+.pareto-chart-wrap { position: relative; height: 350px; }
+.pareto-empty { text-align: center; color: #64748b; padding: 40px; }
+
 /* مودال الاعتماد/الرفض التفصيلي */
 .review-option { display: flex; align-items: center; gap: 10px; background: #334155; padding: 12px 16px; border-radius: 8px; margin-bottom: 8px; cursor: pointer; }
 .review-option input { width: 16px; height: 16px; }
@@ -123,6 +133,24 @@ tr.row-clickable { cursor: pointer; }
 <button class="reset-btn" id="resetFilter" data-i18n="reset_btn">↺ إعادة تعيين</button>
 <button class="export-btn" id="exportBtn" data-i18n="export_btn">⬇ تصدير</button>
 <button class="delete-btn" id="deleteSelectedBtn" style="display:none;" data-i18n="delete_selected">🗑 حذف المحدد</button>
+</div>
+
+<div class="pareto-panel">
+<h2>📊 تحليل باريتو</h2>
+<div class="pareto-controls">
+  <label>تجميع حسب (المحور X):</label>
+  <select id="paretoGroupBy">
+    <option value="stage_name">المحطة</option>
+    <option value="defect_type_name">نوع العيب</option>
+    <option value="technician_email">الفني</option>
+    <option value="status">الحالة</option>
+  </select>
+  <span style="color:#64748b; font-size:12px;">المحور Y: عدد العيوب (تلقائي) + النسبة التراكمية</span>
+</div>
+<div class="pareto-chart-wrap">
+  <canvas id="paretoCanvas"></canvas>
+</div>
+<div id="paretoEmpty" class="pareto-empty" style="display:none;">📭 لا توجد بيانات كافية لعرض الرسم</div>
 </div>
 
 <div class="table-wrapper">
@@ -273,6 +301,7 @@ function renderTable() {
   const tbody = document.getElementById('tbody');
   if (allDefects.length === 0) {
     tbody.innerHTML = `<tr><td colspan="9" class="no-data">📭 لا توجد عيوب مطابقة</td></tr>`;
+    renderParetoChart();
     return;
   }
 
@@ -306,7 +335,106 @@ function renderTable() {
   tbody.querySelectorAll('.approve-btn, .reject-btn').forEach(btn => {
     btn.addEventListener('click', () => reviewDefect(btn.dataset.id, btn.dataset.action));
   });
+
+  renderParetoChart();
 }
+
+// ============ رسم باريتو التفاعلي ============
+let paretoChartInstance = null;
+
+const paretoLabels = {
+  stage_name: (d) => d.stages ? d.stages.name : (d.stage_name || 'غير محدد'),
+  defect_type_name: (d) => d.defect_type_name || 'غير محدد',
+  technician_email: (d) => d.technician_email || 'غير محدد',
+  status: (d) => statusText[d.status] || d.status || 'غير محدد',
+};
+
+function renderParetoChart() {
+  const groupBy = document.getElementById('paretoGroupBy').value;
+  const getLabel = paretoLabels[groupBy];
+  const canvas = document.getElementById('paretoCanvas');
+  const emptyMsg = document.getElementById('paretoEmpty');
+
+  if (!allDefects || allDefects.length === 0) {
+    canvas.style.display = 'none';
+    emptyMsg.style.display = 'block';
+    if (paretoChartInstance) { paretoChartInstance.destroy(); paretoChartInstance = null; }
+    return;
+  }
+  canvas.style.display = 'block';
+  emptyMsg.style.display = 'none';
+
+  // تجميع العدد حسب الفئة المختارة
+  const counts = {};
+  allDefects.forEach(d => {
+    const key = getLabel(d);
+    counts[key] = (counts[key] || 0) + 1;
+  });
+
+  // ترتيب تنازلي (الأساس في رسم باريتو)
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const labels = sorted.map(([k]) => k);
+  const values = sorted.map(([, v]) => v);
+  const total = values.reduce((a, b) => a + b, 0);
+
+  // النسبة التراكمية
+  let running = 0;
+  const cumulativePercent = values.map(v => {
+    running += v;
+    return +(running / total * 100).toFixed(1);
+  });
+
+  if (paretoChartInstance) paretoChartInstance.destroy();
+
+  paretoChartInstance = new Chart(canvas.getContext('2d'), {
+    data: {
+      labels,
+      datasets: [
+        {
+          type: 'bar',
+          label: 'عدد العيوب',
+          data: values,
+          backgroundColor: '#3b82f6',
+          yAxisID: 'yCount',
+        },
+        {
+          type: 'line',
+          label: 'النسبة التراكمية %',
+          data: cumulativePercent,
+          borderColor: '#fbbf24',
+          backgroundColor: '#fbbf24',
+          yAxisID: 'yPercent',
+          tension: 0.2,
+          pointRadius: 3,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#e2e8f0' } },
+      },
+      scales: {
+        x: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
+        yCount: {
+          type: 'linear', position: 'left',
+          ticks: { color: '#94a3b8' }, grid: { color: '#334155' },
+          title: { display: true, text: 'عدد العيوب', color: '#94a3b8' },
+        },
+        yPercent: {
+          type: 'linear', position: 'right',
+          min: 0, max: 100,
+          ticks: { color: '#fbbf24' }, grid: { drawOnChartArea: false },
+          title: { display: true, text: 'النسبة التراكمية %', color: '#fbbf24' },
+        },
+      },
+    },
+  });
+}
+
+document.getElementById('paretoGroupBy').addEventListener('change', renderParetoChart);
 
 // ============ مودال المراجعة التفصيلي (اعتماد/رفض) ============
 const reviewModal = document.getElementById('reviewModal');
