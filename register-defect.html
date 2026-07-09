@@ -83,6 +83,13 @@ textarea { resize: vertical; min-height: 80px; }
 <label data-i18n="description_label">وصف العيب (اختياري)</label>
 <textarea id="descriptionInput" placeholder="اكتب تفاصيل إضافية عن العيب..."></textarea>
 
+<label>📷 صورة العيب (اختياري)</label>
+<input type="file" id="photoInput" accept="image/*" capture="environment" style="width:100%; padding:10px; margin-bottom:8px; border:none; border-radius:8px; background:#334155; color:#f1f5f9; font-size:13px;" />
+<div id="photoPreviewWrap" style="display:none; margin-bottom:18px;">
+  <img id="photoPreview" style="max-width:100%; max-height:200px; border-radius:8px;" />
+  <div id="photoSizeInfo" style="color:#64748b; font-size:11px; margin-top:4px;"></div>
+</div>
+
 <button type="submit" class="btn-submit" id="submitBtn" data-i18n="submit_defect_btn">✅ تسجيل العيب</button>
 </form>
 <div id="successMsg" class="msg msg-success">✅ تم تسجيل العيب بنجاح!</div>
@@ -102,6 +109,56 @@ textarea { resize: vertical; min-height: 80px; }
 <script>
 let currentUser = null;
 let currentScanner = null;
+let compressedPhotoBlob = null;
+
+// ضغط الصورة تلقائيًا باستخدام Canvas (أقصى بعد 1280px، جودة JPEG 70%)
+function compressImage(file, maxDimension = 1280, quality = 0.7) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = (e) => { img.src = e.target.result; };
+    reader.onerror = reject;
+    img.onload = () => {
+      let { width, height } = img;
+      if (width > height && width > maxDimension) {
+        height = Math.round(height * (maxDimension / width));
+        width = maxDimension;
+      } else if (height > maxDimension) {
+        width = Math.round(width * (maxDimension / height));
+        height = maxDimension;
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      canvas.toBlob((blob) => resolve(blob), 'image/jpeg', quality);
+    };
+    img.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+document.getElementById('photoInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) { compressedPhotoBlob = null; document.getElementById('photoPreviewWrap').style.display = 'none'; return; }
+
+  const originalSizeKB = Math.round(file.size / 1024);
+  document.getElementById('photoSizeInfo').textContent = '⏳ جاري ضغط الصورة...';
+  document.getElementById('photoPreviewWrap').style.display = 'block';
+
+  try {
+    compressedPhotoBlob = await compressImage(file);
+    const compressedSizeKB = Math.round(compressedPhotoBlob.size / 1024);
+    document.getElementById('photoPreview').src = URL.createObjectURL(compressedPhotoBlob);
+    document.getElementById('photoSizeInfo').textContent =
+      `📦 الحجم الأصلي: ${originalSizeKB} كيلو ← بعد الضغط: ${compressedSizeKB} كيلو`;
+  } catch (err) {
+    console.error('فشل ضغط الصورة:', err);
+    compressedPhotoBlob = file; // لو فشل الضغط، نرفع الأصلية
+    document.getElementById('photoSizeInfo').textContent = '⚠️ لم يتم الضغط، سيتم رفع الصورة الأصلية';
+  }
+});
 
 async function init() {
   applyTranslations();
@@ -238,6 +295,25 @@ document.getElementById('defectForm').addEventListener('submit', async (e) => {
     technician_email: currentUser.email,
   };
 
+  // رفع الصورة أولاً لو موجودة ومتصل بالنت (الصور مش مدعومة أوفلاين حاليًا)
+  if (compressedPhotoBlob && navigator.onLine) {
+    try {
+      const fileName = `${currentUser.id}_${Date.now()}.jpg`;
+      const { error: uploadError } = await sbClient.storage
+        .from('defect-photos')
+        .upload(fileName, compressedPhotoBlob, { contentType: 'image/jpeg' });
+
+      if (!uploadError) {
+        const { data: urlData } = sbClient.storage.from('defect-photos').getPublicUrl(fileName);
+        defectPayload.photo_url = urlData.publicUrl;
+      } else {
+        console.warn('فشل رفع الصورة، سيتم تسجيل العيب بدونها:', uploadError);
+      }
+    } catch (err) {
+      console.warn('فشل رفع الصورة، سيتم تسجيل العيب بدونها:', err);
+    }
+  }
+
   try {
     if (!navigator.onLine) {
       // مفيش نت خالص - احفظ محليًا فورًا من غير ما نحاول أصلاً
@@ -249,7 +325,7 @@ document.getElementById('defectForm').addEventListener('submit', async (e) => {
 
     successMsg.textContent = '✅ تم تسجيل العيب بنجاح!';
     successMsg.style.display = 'block';
-    document.getElementById('defectForm').reset();
+    document.getElementById('defectForm').reset(); compressedPhotoBlob = null; document.getElementById('photoPreviewWrap').style.display = 'none';
     document.getElementById('jobOrderPreview').style.display = 'none';
     document.getElementById('defectTypeSelect').innerHTML = '<option value="">-- اختر نوع العيب (اختياري) --</option>';
     setTimeout(() => { successMsg.style.display = 'none'; }, 4000);
@@ -258,7 +334,7 @@ document.getElementById('defectForm').addEventListener('submit', async (e) => {
     queueDefectOffline(defectPayload);
     successMsg.textContent = '📴 مفيش اتصال بالنت دلوقتي — تم حفظ العيب محليًا وهيترفع تلقائيًا لما النت يرجع.';
     successMsg.style.display = 'block';
-    document.getElementById('defectForm').reset();
+    document.getElementById('defectForm').reset(); compressedPhotoBlob = null; document.getElementById('photoPreviewWrap').style.display = 'none';
     document.getElementById('jobOrderPreview').style.display = 'none';
     document.getElementById('defectTypeSelect').innerHTML = '<option value="">-- اختر نوع العيب (اختياري) --</option>';
     renderPendingBadge('pendingBadgeWrap');
