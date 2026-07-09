@@ -88,6 +88,19 @@ tr.row-clickable { cursor: pointer; }
 .pareto-chart-wrap { position: relative; height: 350px; }
 .pareto-empty { text-align: center; color: #64748b; padding: 40px; }
 
+/* بانل سجل التعديلات الكامل لسيريال معين */
+.serial-history-panel { background: #1e293b; border-radius: 14px; padding: 20px 24px; margin-bottom: 16px; display: none; }
+.serial-history-panel.open { display: block; }
+.serial-history-panel h3 { color: #60a5fa; font-size: 15px; margin-bottom: 12px; }
+.serial-history-entry { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #334155; font-size: 13px; }
+.serial-history-entry:last-child { border-bottom: none; }
+.serial-history-entry .sh-action { font-weight: bold; min-width: 90px; }
+.serial-history-entry .sh-action.created { color: #60a5fa; }
+.serial-history-entry .sh-action.approved { color: #4ade80; }
+.serial-history-entry .sh-action.rejected { color: #f87171; }
+.serial-history-entry .sh-who { color: #cbd5e1; }
+.serial-history-entry .sh-when { color: #64748b; font-size: 11px; margin-right: auto; }
+
 /* مودال الاعتماد/الرفض التفصيلي */
 .review-option { display: flex; align-items: center; gap: 10px; background: #334155; padding: 12px 16px; border-radius: 8px; margin-bottom: 8px; cursor: pointer; }
 .review-option input { width: 16px; height: 16px; }
@@ -129,10 +142,21 @@ tr.row-clickable { cursor: pointer; }
 </select>
 <input type="text" id="filterSerial" data-i18n-placeholder="col_serial" placeholder="بحث بالسيريال / الجوب أوردر" />
 <input type="text" id="filterDefectType" placeholder="بحث بنوع العيب" />
+<input type="text" id="filterTechnician" placeholder="بحث بالفني" />
+<input type="text" id="filterLine" placeholder="خط الإنتاج" />
+<label style="color:#94a3b8; font-size:12px;">من:</label>
+<input type="date" id="filterDateFrom" />
+<label style="color:#94a3b8; font-size:12px;">إلى:</label>
+<input type="date" id="filterDateTo" />
 <button id="applyFilter" data-i18n="filter_btn">🔍 تصفية</button>
 <button class="reset-btn" id="resetFilter" data-i18n="reset_btn">↺ إعادة تعيين</button>
 <button class="export-btn" id="exportBtn" data-i18n="export_btn">⬇ تصدير</button>
 <button class="delete-btn" id="deleteSelectedBtn" style="display:none;" data-i18n="delete_selected">🗑 حذف المحدد</button>
+</div>
+
+<div class="serial-history-panel" id="serialHistoryPanel">
+<h3 id="serialHistoryTitle">📜 سجل التعديلات الكامل</h3>
+<div id="serialHistoryBody"></div>
 </div>
 
 <div class="pareto-panel">
@@ -157,9 +181,9 @@ tr.row-clickable { cursor: pointer; }
 <table>
 <thead><tr>
   <th id="checkboxHeaderCell" style="display:none;"><input type="checkbox" id="selectAllCheckbox" /></th>
-  <th data-i18n="col_serial">السيريال</th><th data-i18n="col_job_order">الجوب أوردر</th><th data-i18n="col_station">المحطة</th><th data-i18n="col_defect_type">نوع العيب</th><th data-i18n="col_status">الحالة</th><th data-i18n="col_technician">الفني</th><th data-i18n="col_date">التاريخ</th><th></th>
+  <th data-i18n="col_serial">السيريال</th><th data-i18n="col_job_order">الجوب أوردر</th><th data-i18n="col_station">المحطة</th><th>خط الإنتاج</th><th data-i18n="col_defect_type">نوع العيب</th><th data-i18n="col_status">الحالة</th><th data-i18n="col_technician">الفني</th><th data-i18n="col_date">التاريخ</th><th>مين راجع</th><th>تاريخ الإغلاق</th><th>الملاحظة</th><th></th>
 </tr></thead>
-<tbody id="tbody"><tr><td colspan="9" class="loading">⏳ جاري التحميل...</td></tr></tbody>
+<tbody id="tbody"><tr><td colspan="13" class="loading">⏳ جاري التحميل...</td></tr></tbody>
 </table>
 </div>
 </div>
@@ -260,23 +284,33 @@ async function loadStagesFilter() {
 // ============ تحميل العيوب ============
 async function loadDefects() {
   const tbody = document.getElementById('tbody');
-  tbody.innerHTML = `<tr><td colspan="9" class="loading">⏳ جاري التحميل...</td></tr>`;
+  tbody.innerHTML = `<tr><td colspan="13" class="loading">⏳ جاري التحميل...</td></tr>`;
 
   const stageId = document.getElementById('filterStage').value;
   const status = document.getElementById('filterStatus').value;
   const search = document.getElementById('filterSerial').value.trim();
   const defectTypeSearch = document.getElementById('filterDefectType').value.trim();
+  const technicianSearch = document.getElementById('filterTechnician').value.trim();
+  const lineSearch = document.getElementById('filterLine').value.trim();
+  const dateFrom = document.getElementById('filterDateFrom').value;
+  const dateTo = document.getElementById('filterDateTo').value;
 
-  let query = sbClient.from('defects').select('*, stages(name)').order('created_at', { ascending: false });
+  let query = sbClient.from('defects').select('*, stages(name, line_no)').order('created_at', { ascending: false });
   if (stageId) query = query.eq('stage_id', stageId);
   if (status) query = query.eq('status', status);
   if (search) query = query.or(`serial_number.ilike.%${search}%,job_order.ilike.%${search}%`);
   if (defectTypeSearch) query = query.ilike('defect_type_name', `%${defectTypeSearch}%`);
+  if (technicianSearch) query = query.ilike('technician_email', `%${technicianSearch}%`);
+  if (dateFrom) query = query.gte('created_at', dateFrom + 'T00:00:00');
+  if (dateTo) query = query.lte('created_at', dateTo + 'T23:59:59');
 
   try {
     const { data, error } = await query;
     if (error) throw error;
-    allDefects = data || [];
+    // فلتر خط الإنتاج بنعمله على الناتج (لأنه جوه علاقة stages مش عمود مباشر)
+    allDefects = lineSearch
+      ? (data || []).filter(d => (d.stages?.line_no || '').toLowerCase().includes(lineSearch.toLowerCase()))
+      : (data || []);
   } catch (err) {
     // مفيش نت - استخدم النسخة المحفوظة محليًا وفلترها بنفسنا بنفس معايير الفلتر
     let cached = getCachedAllDefects();
@@ -289,18 +323,80 @@ async function loadDefects() {
     if (defectTypeSearch) cached = cached.filter(d =>
       (d.defect_type_name || '').toLowerCase().includes(defectTypeSearch.toLowerCase())
     );
+    if (technicianSearch) cached = cached.filter(d =>
+      (d.technician_email || '').toLowerCase().includes(technicianSearch.toLowerCase())
+    );
+    if (lineSearch) cached = cached.filter(d =>
+      (d.stages?.line_no || '').toLowerCase().includes(lineSearch.toLowerCase())
+    );
+    if (dateFrom) cached = cached.filter(d => d.created_at >= dateFrom + 'T00:00:00');
+    if (dateTo) cached = cached.filter(d => d.created_at <= dateTo + 'T23:59:59');
     allDefects = cached;
   }
+
+  renderSerialHistoryPanel(search);
 
   renderTable();
 }
 
 const statusText = { pending: t('status_pending'), approved: t('status_approved'), rejected: t('status_rejected') };
 
+// ============ سجل التعديلات الكامل لسيريال معين ============
+async function renderSerialHistoryPanel(searchTerm) {
+  const panel = document.getElementById('serialHistoryPanel');
+  const body = document.getElementById('serialHistoryBody');
+  const title = document.getElementById('serialHistoryTitle');
+
+  // بيظهر بس لو فيه بحث فعلي وفيه عيوب مطابقة (بنعرض السجل الكامل لكل العيوب المطابقة)
+  if (!searchTerm || allDefects.length === 0) {
+    panel.classList.remove('open');
+    return;
+  }
+
+  const defectIds = allDefects.map(d => d.id);
+  if (defectIds.length === 0) {
+    panel.classList.remove('open');
+    return;
+  }
+
+  title.textContent = `📜 سجل التعديلات الكامل - "${searchTerm}" (${defectIds.length} عيب مطابق)`;
+  panel.classList.add('open');
+  body.innerHTML = '⏳ جاري التحميل...';
+
+  let data, error;
+  try {
+    const result = await sbClient
+      .from('defect_history')
+      .select('*')
+      .in('defect_id', defectIds)
+      .order('created_at', { ascending: true });
+    data = result.data;
+    error = result.error;
+  } catch (err) {
+    body.innerHTML = '<div style="color:#64748b; font-size:13px;">📴 مفيش اتصال بالنت - سجل التعديلات مش متاح دلوقتي</div>';
+    return;
+  }
+
+  if (error || !data || data.length === 0) {
+    body.innerHTML = '<div style="color:#64748b; font-size:13px;">لا يوجد سجل تعديلات</div>';
+    return;
+  }
+
+  const actionText = { created: '📝 تسجيل', approved: '✔ اعتماد', rejected: '✖ رفض' };
+  body.innerHTML = data.map(h => `
+    <div class="serial-history-entry">
+      <span class="sh-action ${h.action}">${actionText[h.action] || h.action}</span>
+      <span class="sh-who">${h.performed_by_email || '-'}</span>
+      ${h.note ? `<span class="sh-who" style="color:#94a3b8;">(${h.note})</span>` : ''}
+      <span class="sh-when">${formatDate(h.created_at)}</span>
+    </div>
+  `).join('');
+}
+
 function renderTable() {
   const tbody = document.getElementById('tbody');
   if (allDefects.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="9" class="no-data">📭 لا توجد عيوب مطابقة</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="13" class="no-data">📭 لا توجد عيوب مطابقة</td></tr>`;
     renderParetoChart();
     return;
   }
@@ -319,10 +415,14 @@ function renderTable() {
       <td>${d.serial_number}</td>
       <td>${d.job_order || '-'}</td>
       <td>${d.stages ? d.stages.name : '-'}</td>
+      <td>${d.stages && d.stages.line_no ? d.stages.line_no : '-'}</td>
       <td>${d.defect_type_name || '-'}</td>
       <td><span class="status-badge ${d.status}">${statusText[d.status]}</span></td>
       <td>${d.technician_email ? d.technician_email.split('@')[0] : '-'}</td>
       <td style="font-size:11px;">${formatDate(d.created_at)}</td>
+      <td>${d.reviewed_by_email ? d.reviewed_by_email.split('@')[0] : '-'}</td>
+      <td style="font-size:11px;">${d.reviewed_at ? formatDate(d.reviewed_at) : '-'}</td>
+      <td style="max-width:180px; white-space:normal; font-size:11px;">${d.review_note || '-'}</td>
       <td onclick="event.stopPropagation()">
         ${showActions ? `<button class="action-btn approve-btn" data-id="${d.id}" data-action="approved">✔ ${d.status === 'pending' ? 'اعتماد' : 'إعادة تقييم: اعتماد'}</button>
         <button class="action-btn reject-btn" data-id="${d.id}" data-action="rejected">✖ ${d.status === 'pending' ? 'رفض' : 'إعادة تقييم: رفض'}</button>` : ''}
@@ -535,11 +635,17 @@ document.getElementById('confirmReviewBtn').addEventListener('click', async () =
 document.getElementById('applyFilter').addEventListener('click', loadDefects);
 document.getElementById('filterSerial').addEventListener('keypress', (e) => { if (e.key === 'Enter') loadDefects(); });
 document.getElementById('filterDefectType').addEventListener('keypress', (e) => { if (e.key === 'Enter') loadDefects(); });
+document.getElementById('filterTechnician').addEventListener('keypress', (e) => { if (e.key === 'Enter') loadDefects(); });
+document.getElementById('filterLine').addEventListener('keypress', (e) => { if (e.key === 'Enter') loadDefects(); });
 document.getElementById('resetFilter').addEventListener('click', () => {
   document.getElementById('filterStage').value = '';
   document.getElementById('filterStatus').value = '';
   document.getElementById('filterSerial').value = '';
   document.getElementById('filterDefectType').value = '';
+  document.getElementById('filterTechnician').value = '';
+  document.getElementById('filterLine').value = '';
+  document.getElementById('filterDateFrom').value = '';
+  document.getElementById('filterDateTo').value = '';
   loadDefects();
 });
 
