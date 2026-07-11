@@ -192,9 +192,9 @@ tr.row-clickable { cursor: pointer; }
 <table>
 <thead><tr>
   <th id="checkboxHeaderCell" style="display:none;"><input type="checkbox" id="selectAllCheckbox" /></th>
-  <th data-i18n="col_serial">السيريال</th><th data-i18n="col_job_order">الجوب أوردر</th><th data-i18n="col_station">المحطة</th><th>خط الإنتاج</th><th data-i18n="col_defect_type">نوع العيب</th><th>الصورة</th><th data-i18n="col_status">الحالة</th><th data-i18n="col_technician">الفني</th><th data-i18n="col_date">التاريخ</th><th>مين راجع</th><th>تاريخ الإغلاق</th><th>الملاحظة</th><th></th>
+  <th data-i18n="col_serial">السيريال</th><th>كود العيب</th><th data-i18n="col_job_order">الجوب أوردر</th><th data-i18n="col_station">المحطة</th><th>خط الإنتاج</th><th data-i18n="col_defect_type">نوع العيب</th><th>الصورة</th><th data-i18n="col_status">الحالة</th><th data-i18n="col_technician">الفني</th><th data-i18n="col_date">التاريخ</th><th>مين راجع</th><th>تاريخ الإغلاق</th><th>الملاحظة</th><th></th>
 </tr></thead>
-<tbody id="tbody"><tr><td colspan="14" class="loading">⏳ جاري التحميل...</td></tr></tbody>
+<tbody id="tbody"><tr><td colspan="15" class="loading">⏳ جاري التحميل...</td></tr></tbody>
 </table>
 </div>
 </div>
@@ -327,7 +327,7 @@ document.getElementById('photoLightboxClose').addEventListener('click', () => {
 // ============ تحميل العيوب ============
 async function loadDefects() {
   const tbody = document.getElementById('tbody');
-  tbody.innerHTML = `<tr><td colspan="14" class="loading">⏳ جاري التحميل...</td></tr>`;
+  tbody.innerHTML = `<tr><td colspan="15" class="loading">⏳ جاري التحميل...</td></tr>`;
 
   const stageId = document.getElementById('filterStage').value;
   const status = document.getElementById('filterStatus').value;
@@ -443,7 +443,7 @@ async function renderSerialHistoryPanel(searchTerm) {
 function renderTable() {
   const tbody = document.getElementById('tbody');
   if (allDefects.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="14" class="no-data">📭 لا توجد عيوب مطابقة</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="15" class="no-data">📭 لا توجد عيوب مطابقة</td></tr>`;
     renderParetoChart();
     return;
   }
@@ -461,6 +461,7 @@ function renderTable() {
     tr.innerHTML = `
       ${canSelect ? `<td onclick="event.stopPropagation()"><input type="checkbox" class="row-checkbox" data-id="${d.id}" data-status="${d.status}" /></td>` : ''}
       <td>${d.serial_number}</td>
+      <td style="font-weight:bold; color:#93c5fd;">${d.defect_code || '-'}</td>
       <td>${d.job_order || '-'}</td>
       <td>${d.stages ? d.stages.name : '-'}</td>
       <td>${d.stages && d.stages.line_no ? d.stages.line_no : '-'}</td>
