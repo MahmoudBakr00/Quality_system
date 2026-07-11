@@ -205,6 +205,10 @@ tr.row-clickable { cursor: pointer; }
 <div class="modal-box">
 <h3 id="historyTitle">📋 تاريخ العيب</h3>
 <div id="historyBody"></div>
+<div id="historyActionsWrap" style="display:none; margin-top:14px; gap:10px;">
+  <button class="action-btn approve-btn" id="historyApproveBtn" style="flex:1; padding:10px; font-size:14px;">✔ اعتماد</button>
+  <button class="action-btn reject-btn" id="historyRejectBtn" style="flex:1; padding:10px; font-size:14px;">✖ رفض</button>
+</div>
 <button class="modal-close" id="historyClose">إغلاق</button>
 </div>
 </div>
@@ -306,6 +310,7 @@ async function init() {
 
   loadStagesFilter();
   loadDefects();
+  openDefectFromUrlIfPresent();
 }
 
 // بيحمّل المحطات اللي المشرف الحالي يقدر يعتمد/يرفض عليها (مفتوحة للكل أو مخصصة له)
@@ -780,11 +785,21 @@ document.getElementById('deleteSelectedBtn').addEventListener('click', async () 
 
 // ============ مودال تاريخ العيب ============
 const historyModal = document.getElementById('historyModal');
+let currentModalDefect = null;
+
 async function openHistoryModal(defect) {
-  document.getElementById('historyTitle').textContent = '📋 تاريخ العيب - ' + defect.serial_number;
+  currentModalDefect = defect;
+  document.getElementById('historyTitle').textContent = '📋 تاريخ العيب - ' + defect.serial_number + (defect.defect_code ? ' (' + defect.defect_code + ')' : '');
   const body = document.getElementById('historyBody');
   body.innerHTML = '⏳ جاري التحميل...';
   historyModal.classList.add('open');
+
+  // إظهار أزرار الاعتماد/الرفض لو المستخدم عنده صلاحية وحالة العيب لسه قيد المراجعة
+  const actionsWrap = document.getElementById('historyActionsWrap');
+  const canReview = currentRole === 'admin' || currentRole === 'supervisor';
+  const supervisorCanReviewThis = currentRole !== 'supervisor' || (supervisorAllowedStageIds && supervisorAllowedStageIds.has(defect.stage_id));
+  const showActionsHere = canReview && defect.status === 'pending' && supervisorCanReviewThis;
+  actionsWrap.style.display = showActionsHere ? 'flex' : 'none';
 
   const { data, error } = await sbClient
     .from('defect_history')
@@ -806,7 +821,41 @@ async function openHistoryModal(defect) {
     </div>
   `).join('');
 }
-document.getElementById('historyClose').addEventListener('click', () => historyModal.classList.remove('open'));
+document.getElementById('historyClose').addEventListener('click', () => {
+  historyModal.classList.remove('open');
+  currentModalDefect = null;
+});
+
+document.getElementById('historyApproveBtn').addEventListener('click', () => {
+  if (!currentModalDefect) return;
+  historyModal.classList.remove('open');
+  reviewDefect(currentModalDefect.id, 'approved');
+});
+document.getElementById('historyRejectBtn').addEventListener('click', () => {
+  if (!currentModalDefect) return;
+  historyModal.classList.remove('open');
+  reviewDefect(currentModalDefect.id, 'rejected');
+});
+
+// لو دخلنا على الصفحة من رابط إشعار (dashboard.html?defect_id=xxx) افتح تفاصيل العيب ده مباشرة
+async function openDefectFromUrlIfPresent() {
+  const params = new URLSearchParams(window.location.search);
+  const defectId = params.get('defect_id');
+  if (!defectId) return;
+
+  const { data, error } = await sbClient
+    .from('defects')
+    .select('*, stages(name, line_no)')
+    .eq('id', defectId)
+    .maybeSingle();
+
+  if (error || !data) {
+    alert('⚠️ تعذر العثور على العيب المطلوب (ربما اتحذف أو مش عندك صلاحية تشوفه)');
+    return;
+  }
+
+  openHistoryModal(data);
+}
 
 // ============ إدارة المحطات (أدمن فقط) ============
 const stationsModal = document.getElementById('stationsModal');
