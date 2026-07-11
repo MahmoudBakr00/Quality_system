@@ -65,6 +65,7 @@ tr.row-clickable { cursor: pointer; }
 .history-item .action.created { color: #60a5fa; }
 .history-item .action.approved { color: #4ade80; }
 .history-item .action.rejected { color: #f87171; }
+.history-item .action.edited { color: #a78bfa; }
 .history-item .meta { color: #94a3b8; font-size: 12px; margin-top: 4px; }
 
 /* إدارة المحطات */
@@ -109,6 +110,7 @@ tr.row-clickable { cursor: pointer; }
 .serial-history-entry .sh-action.created { color: #60a5fa; }
 .serial-history-entry .sh-action.approved { color: #4ade80; }
 .serial-history-entry .sh-action.rejected { color: #f87171; }
+.serial-history-entry .sh-action.edited { color: #a78bfa; }
 .serial-history-entry .sh-who { color: #cbd5e1; }
 .serial-history-entry .sh-when { color: #64748b; font-size: 11px; margin-right: auto; }
 
@@ -214,7 +216,33 @@ tr.row-clickable { cursor: pointer; }
   <button class="action-btn approve-btn" id="historyApproveBtn" style="flex:1; padding:10px; font-size:14px;">✔ اعتماد</button>
   <button class="action-btn reject-btn" id="historyRejectBtn" style="flex:1; padding:10px; font-size:14px;">✖ رفض</button>
 </div>
+<div id="historyEditWrap" style="display:none; margin-top:10px;">
+  <button id="historyEditBtn" style="width:100%; padding:10px; background:#8b5cf6; color:white; border:none; border-radius:8px; font-size:13px; font-weight:bold; cursor:pointer;">✏️ تعديل بيانات العيب يدويًا</button>
+</div>
 <button class="modal-close" id="historyClose">إغلاق</button>
+</div>
+</div>
+
+<!-- مودال تعديل بيانات العيب يدويًا -->
+<div class="modal-overlay" id="editDefectModal">
+<div class="modal-box">
+<h3>✏️ تعديل بيانات العيب</h3>
+<label style="color:#94a3b8; font-size:12px; display:block; margin:10px 0 6px;">السيريال</label>
+<input type="text" id="editSerialInput" style="width:100%; padding:10px; border:none; border-radius:8px; background:#334155; color:#f1f5f9;" />
+
+<label style="color:#94a3b8; font-size:12px; display:block; margin:14px 0 6px;">محطة الفحص</label>
+<select id="editStageSelect" style="width:100%; padding:10px; border:none; border-radius:8px; background:#334155; color:#f1f5f9;"></select>
+
+<label style="color:#94a3b8; font-size:12px; display:block; margin:14px 0 6px;">نوع العيب</label>
+<select id="editDefectTypeSelect" style="width:100%; padding:10px; border:none; border-radius:8px; background:#334155; color:#f1f5f9;">
+  <option value="">-- بدون تحديد --</option>
+</select>
+
+<label style="color:#94a3b8; font-size:12px; display:block; margin:14px 0 6px;">وصف العيب</label>
+<textarea id="editDescriptionInput" rows="3" style="width:100%; padding:10px; border:none; border-radius:8px; background:#334155; color:#f1f5f9; resize:vertical;"></textarea>
+
+<button id="saveEditDefectBtn" style="width:100%; padding:12px; background:#22c55e; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; margin-top:16px;">💾 حفظ التعديلات</button>
+<button class="modal-close" id="editDefectClose">إلغاء</button>
 </div>
 </div>
 
@@ -482,7 +510,7 @@ async function renderSerialHistoryPanel(searchTerm) {
     return;
   }
 
-  const actionText = { created: '📝 تسجيل', approved: '✔ اعتماد', rejected: '✖ رفض' };
+  const actionText = { created: '📝 تسجيل', approved: '✔ اعتماد', rejected: '✖ رفض', edited: '✏️ تعديل يدوي' };
   body.innerHTML = data.map(h => `
     <div class="serial-history-entry">
       <span class="sh-action ${h.action}">${actionText[h.action] || h.action}</span>
@@ -826,6 +854,11 @@ async function openHistoryModal(defect) {
   const showActionsHere = canReview && defect.status === 'pending' && supervisorCanReviewThis;
   actionsWrap.style.display = showActionsHere ? 'flex' : 'none';
 
+  // زرار التعديل اليدوي: متاح للأدمن دايمًا، وللمشرف بس على المحطات اللي هو مسؤول عنها
+  // ومتاح بغض النظر عن حالة العيب (حتى لو معتمد أو مرفوض بالفعل)
+  const editWrap = document.getElementById('historyEditWrap');
+  editWrap.style.display = (canReview && supervisorCanReviewThis) ? 'block' : 'none';
+
   const { data, error } = await sbClient
     .from('defect_history')
     .select('*')
@@ -837,7 +870,7 @@ async function openHistoryModal(defect) {
     return;
   }
 
-  const actionText = { created: '📝 تم التسجيل', approved: '✔ تم الاعتماد', rejected: '✖ تم الرفض' };
+  const actionText = { created: '📝 تم التسجيل', approved: '✔ تم الاعتماد', rejected: '✖ تم الرفض', edited: '✏️ تم التعديل اليدوي' };
   body.innerHTML = data.map(h => `
     <div class="history-item">
       <div class="action ${h.action}">${actionText[h.action] || h.action}</div>
@@ -860,6 +893,104 @@ document.getElementById('historyRejectBtn').addEventListener('click', () => {
   if (!currentModalDefect) return;
   historyModal.classList.remove('open');
   reviewDefect(currentModalDefect.id, 'rejected');
+});
+
+// ============ تعديل بيانات العيب يدويًا ============
+const editDefectModal = document.getElementById('editDefectModal');
+
+document.getElementById('historyEditBtn').addEventListener('click', async () => {
+  if (!currentModalDefect) return;
+  historyModal.classList.remove('open');
+  await openEditDefectModal(currentModalDefect);
+});
+
+async function openEditDefectModal(defect) {
+  document.getElementById('editSerialInput').value = defect.serial_number || '';
+  document.getElementById('editDescriptionInput').value = defect.description || '';
+
+  // تحميل قائمة المحطات
+  const stageSelect = document.getElementById('editStageSelect');
+  const { data: stages } = await sbClient.from('stages').select('*').order('name');
+  stageSelect.innerHTML = (stages || []).map(s =>
+    `<option value="${s.id}" ${s.id === defect.stage_id ? 'selected' : ''}>${s.name}${s.line_no ? ' (خط ' + s.line_no + ')' : ''}</option>`
+  ).join('');
+
+  await loadEditDefectTypes(defect.stage_id, defect.defect_type_id);
+
+  editDefectModal.dataset.defectId = defect.id;
+  editDefectModal.classList.add('open');
+}
+
+async function loadEditDefectTypes(stageId, selectedDefectTypeId) {
+  const dtSelect = document.getElementById('editDefectTypeSelect');
+  dtSelect.innerHTML = '<option value="">-- بدون تحديد --</option>';
+  if (!stageId) return;
+  const { data: types } = await sbClient.from('defect_types').select('*').eq('stage_id', stageId).order('name');
+  (types || []).forEach(t => {
+    const o = document.createElement('option');
+    o.value = t.id;
+    o.textContent = t.name;
+    o.dataset.name = t.name;
+    if (t.id === selectedDefectTypeId) o.selected = true;
+    dtSelect.appendChild(o);
+  });
+}
+
+document.getElementById('editStageSelect').addEventListener('change', (e) => {
+  loadEditDefectTypes(e.target.value, null);
+});
+
+document.getElementById('editDefectClose').addEventListener('click', () => {
+  editDefectModal.classList.remove('open');
+});
+
+document.getElementById('saveEditDefectBtn').addEventListener('click', async () => {
+  const defectId = editDefectModal.dataset.defectId;
+  if (!defectId) return;
+
+  const newSerial = document.getElementById('editSerialInput').value.trim();
+  const newStageId = document.getElementById('editStageSelect').value;
+  const dtSelect = document.getElementById('editDefectTypeSelect');
+  const newDefectTypeId = dtSelect.value || null;
+  const newDefectTypeName = dtSelect.value ? dtSelect.selectedOptions[0].dataset.name : null;
+  const newDescription = document.getElementById('editDescriptionInput').value.trim() || null;
+
+  if (!newSerial) { alert('⚠️ اكتب السيريال'); return; }
+  if (!newStageId) { alert('⚠️ اختر محطة الفحص'); return; }
+
+  const btn = document.getElementById('saveEditDefectBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ جاري الحفظ...';
+
+  try {
+    const { error } = await sbClient.from('defects').update({
+      serial_number: newSerial,
+      stage_id: newStageId,
+      defect_type_id: newDefectTypeId,
+      defect_type_name: newDefectTypeName,
+      description: newDescription,
+    }).eq('id', defectId);
+
+    if (error) throw error;
+
+    // تسجيل التعديل في سجل تاريخ العيب
+    await sbClient.from('defect_history').insert([{
+      defect_id: defectId,
+      action: 'edited',
+      performed_by: currentUser.id,
+      performed_by_email: currentUser.email,
+      note: 'تم تعديل بيانات العيب يدويًا',
+    }]);
+
+    editDefectModal.classList.remove('open');
+    alert('✅ تم حفظ التعديلات بنجاح');
+    loadDefects();
+  } catch (err) {
+    alert('❌ فشل حفظ التعديلات: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '💾 حفظ التعديلات';
+  }
 });
 
 // لو دخلنا على الصفحة من رابط إشعار (dashboard.html?defect_id=xxx) افتح تفاصيل العيب ده مباشرة
