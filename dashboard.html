@@ -161,6 +161,8 @@ tr.row-clickable { cursor: pointer; }
 <button class="reset-btn" id="resetFilter" data-i18n="reset_btn">↺ إعادة تعيين</button>
 <button class="export-btn" id="exportBtn" data-i18n="export_btn">⬇ تصدير</button>
 <button class="delete-btn" id="deleteSelectedBtn" style="display:none;" data-i18n="delete_selected">🗑 حذف المحدد</button>
+<button class="approve-btn" id="bulkApproveBtn" style="display:none; background:#22c55e; color:white; border:none; padding:8px 20px; border-radius:6px; cursor:pointer; font-size:13px; font-weight:bold;">✔ اعتماد المحدد</button>
+<button class="reject-btn" id="bulkRejectBtn" style="display:none; background:#ef4444; color:white; border:none; padding:8px 20px; border-radius:6px; cursor:pointer; font-size:13px; font-weight:bold;">✖ رفض المحدد</button>
 </div>
 
 <div class="serial-history-panel" id="serialHistoryPanel">
@@ -190,9 +192,9 @@ tr.row-clickable { cursor: pointer; }
 <table>
 <thead><tr>
   <th id="checkboxHeaderCell" style="display:none;"><input type="checkbox" id="selectAllCheckbox" /></th>
-  <th data-i18n="col_serial">السيريال</th><th data-i18n="col_job_order">الجوب أوردر</th><th data-i18n="col_station">المحطة</th><th>خط الإنتاج</th><th data-i18n="col_defect_type">نوع العيب</th><th data-i18n="col_status">الحالة</th><th data-i18n="col_technician">الفني</th><th data-i18n="col_date">التاريخ</th><th>مين راجع</th><th>تاريخ الإغلاق</th><th>الملاحظة</th><th></th>
+  <th data-i18n="col_serial">السيريال</th><th data-i18n="col_job_order">الجوب أوردر</th><th data-i18n="col_station">المحطة</th><th>خط الإنتاج</th><th data-i18n="col_defect_type">نوع العيب</th><th>الصورة</th><th data-i18n="col_status">الحالة</th><th data-i18n="col_technician">الفني</th><th data-i18n="col_date">التاريخ</th><th>مين راجع</th><th>تاريخ الإغلاق</th><th>الملاحظة</th><th></th>
 </tr></thead>
-<tbody id="tbody"><tr><td colspan="13" class="loading">⏳ جاري التحميل...</td></tr></tbody>
+<tbody id="tbody"><tr><td colspan="14" class="loading">⏳ جاري التحميل...</td></tr></tbody>
 </table>
 </div>
 </div>
@@ -224,6 +226,14 @@ tr.row-clickable { cursor: pointer; }
 </div>
 </div>
 
+<!-- مودال عرض الصورة بالحجم الكامل -->
+<div class="modal-overlay" id="photoLightbox">
+<div class="modal-box" style="max-width:90vw; text-align:center;">
+<img id="lightboxImg" src="" style="max-width:100%; max-height:75vh; border-radius:10px;" />
+<button class="modal-close" id="photoLightboxClose">إغلاق</button>
+</div>
+</div>
+
 <!-- مودال إدارة المحطات (أدمن فقط) -->
 <div class="modal-overlay" id="stationsModal">
 <div class="modal-box" style="max-width:650px;">
@@ -241,6 +251,14 @@ tr.row-clickable { cursor: pointer; }
 <div id="newStageSupervisorsWrap" style="display:none;">
   <label>اختر المشرفين المسؤولين</label>
   <div class="supervisor-list" id="newStageSupervisorsList"><div style="color:#64748b;font-size:12px;">⏳ جاري تحميل المشرفين...</div></div>
+</div>
+<div class="checkbox-row">
+  <input type="checkbox" id="newStageTechOpenAll" checked />
+  <label style="margin:0;">مفتوحة لكل الفنيين (غير مفعّل = تحدد فنيين بعينهم)</label>
+</div>
+<div id="newStageTechWrap" style="display:none;">
+  <label>اختر الفنيين المسموح لهم بالتسجيل</label>
+  <div class="supervisor-list" id="newStageTechList"><div style="color:#64748b;font-size:12px;">⏳ جاري تحميل الفنيين...</div></div>
 </div>
 <button class="small-btn" style="margin-top:10px; width:100%; padding:10px;" id="addStageBtn">➕ إضافة المحطة</button>
 </div>
@@ -271,8 +289,12 @@ async function init() {
   if (currentRole === 'admin') {
     document.getElementById('stationsBtn').style.display = 'inline-block';
     document.getElementById('usersLink').style.display = 'inline-block';
-    document.getElementById('checkboxHeaderCell').style.display = 'table-cell';
     document.getElementById('deleteSelectedBtn').style.display = 'inline-block';
+  }
+  if (currentRole === 'admin' || currentRole === 'supervisor') {
+    document.getElementById('checkboxHeaderCell').style.display = 'table-cell';
+    document.getElementById('bulkApproveBtn').style.display = 'inline-block';
+    document.getElementById('bulkRejectBtn').style.display = 'inline-block';
   }
 
   loadStagesFilter();
@@ -294,10 +316,18 @@ async function loadStagesFilter() {
   });
 }
 
+function openPhotoLightbox(url) {
+  document.getElementById('lightboxImg').src = url;
+  document.getElementById('photoLightbox').classList.add('open');
+}
+document.getElementById('photoLightboxClose').addEventListener('click', () => {
+  document.getElementById('photoLightbox').classList.remove('open');
+});
+
 // ============ تحميل العيوب ============
 async function loadDefects() {
   const tbody = document.getElementById('tbody');
-  tbody.innerHTML = `<tr><td colspan="13" class="loading">⏳ جاري التحميل...</td></tr>`;
+  tbody.innerHTML = `<tr><td colspan="14" class="loading">⏳ جاري التحميل...</td></tr>`;
 
   const stageId = document.getElementById('filterStage').value;
   const status = document.getElementById('filterStatus').value;
@@ -413,7 +443,7 @@ async function renderSerialHistoryPanel(searchTerm) {
 function renderTable() {
   const tbody = document.getElementById('tbody');
   if (allDefects.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="13" class="no-data">📭 لا توجد عيوب مطابقة</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="14" class="no-data">📭 لا توجد عيوب مطابقة</td></tr>`;
     renderParetoChart();
     return;
   }
@@ -426,14 +456,16 @@ function renderTable() {
     // الأدمن يقدر يعدّل قرار أي عيب في أي وقت (حتى بعد ما يتاخد قرار قبل كده)
     // المشرف بس يقدر يتصرف وهو لسه "قيد المراجعة"
     const showActions = currentRole === 'admin' || (canReview && d.status === 'pending');
+    const canSelect = currentRole === 'admin' || currentRole === 'supervisor';
 
     tr.innerHTML = `
-      ${currentRole === 'admin' ? `<td onclick="event.stopPropagation()"><input type="checkbox" class="row-checkbox" data-id="${d.id}" /></td>` : ''}
+      ${canSelect ? `<td onclick="event.stopPropagation()"><input type="checkbox" class="row-checkbox" data-id="${d.id}" data-status="${d.status}" /></td>` : ''}
       <td>${d.serial_number}</td>
       <td>${d.job_order || '-'}</td>
       <td>${d.stages ? d.stages.name : '-'}</td>
       <td>${d.stages && d.stages.line_no ? d.stages.line_no : '-'}</td>
       <td>${d.defect_type_name || '-'}</td>
+      <td onclick="event.stopPropagation()">${d.photo_url ? `<img src="${d.photo_url}" class="thumb-img" data-full="${d.photo_url}" style="width:36px; height:36px; object-fit:cover; border-radius:6px; cursor:pointer;" />` : '-'}</td>
       <td><span class="status-badge ${d.status}">${statusText[d.status]}</span></td>
       <td>${d.technician_email ? d.technician_email.split('@')[0] : '-'}</td>
       <td style="font-size:11px;">${formatDate(d.created_at)}</td>
@@ -449,9 +481,17 @@ function renderTable() {
     tbody.appendChild(tr);
   });
 
+  tbody.querySelectorAll('.thumb-img').forEach(img => {
+    img.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openPhotoLightbox(img.dataset.full);
+    });
+  });
+
   tbody.querySelectorAll('.approve-btn, .reject-btn').forEach(btn => {
     btn.addEventListener('click', () => reviewDefect(btn.dataset.id, btn.dataset.action));
   });
+
 
   renderParetoChart();
 }
@@ -555,7 +595,7 @@ document.getElementById('paretoGroupBy').addEventListener('change', renderPareto
 
 // ============ مودال المراجعة التفصيلي (اعتماد/رفض) ============
 const reviewModal = document.getElementById('reviewModal');
-let pendingDefectId = null;
+let pendingDefectIds = [];
 let pendingAction = null;
 
 const APPROVE_OPTIONS = [
@@ -570,11 +610,12 @@ const REJECT_OPTIONS = [
   { value: 'other_reject', label: '📝 أخرى' },
 ];
 
-function reviewDefect(defectId, action) {
-  pendingDefectId = defectId;
+function reviewDefect(defectIdOrIds, action) {
+  pendingDefectIds = Array.isArray(defectIdOrIds) ? defectIdOrIds : [defectIdOrIds];
   pendingAction = action;
 
-  document.getElementById('reviewModalTitle').textContent = action === 'approved' ? '✔ تفاصيل الاعتماد' : '✖ تفاصيل الرفض';
+  const countLabel = pendingDefectIds.length > 1 ? ` (${pendingDefectIds.length} عيب)` : '';
+  document.getElementById('reviewModalTitle').textContent = (action === 'approved' ? '✔ تفاصيل الاعتماد' : '✖ تفاصيل الرفض') + countLabel;
   document.getElementById('confirmReviewBtn').className = 'confirm-review-btn' + (action === 'rejected' ? ' reject-mode' : '');
 
   const options = action === 'approved' ? APPROVE_OPTIONS : REJECT_OPTIONS;
@@ -603,7 +644,7 @@ function reviewDefect(defectId, action) {
 
 document.getElementById('reviewModalClose').addEventListener('click', () => {
   reviewModal.classList.remove('open');
-  pendingDefectId = null;
+  pendingDefectIds = [];
 });
 
 document.getElementById('confirmReviewBtn').addEventListener('click', async () => {
@@ -636,7 +677,7 @@ document.getElementById('confirmReviewBtn').addEventListener('click', async () =
     reviewed_by: currentUser.id,
     reviewed_by_email: currentUser.email,
     reviewed_at: new Date().toISOString(),
-  }).eq('id', pendingDefectId);
+  }).in('id', pendingDefectIds);
 
   if (error) {
     alert('❌ فشل التحديث: ' + error.message);
@@ -644,8 +685,21 @@ document.getElementById('confirmReviewBtn').addEventListener('click', async () =
   }
 
   reviewModal.classList.remove('open');
-  pendingDefectId = null;
+  pendingDefectIds = [];
   loadDefects();
+});
+
+// ============ اعتماد/رفض جماعي من شريط الفلاتر ============
+document.getElementById('bulkApproveBtn').addEventListener('click', () => {
+  const ids = Array.from(document.querySelectorAll('.row-checkbox:checked')).map(cb => cb.dataset.id);
+  if (ids.length === 0) { alert('⚠️ اختر عيب واحد على الأقل'); return; }
+  reviewDefect(ids, 'approved');
+});
+
+document.getElementById('bulkRejectBtn').addEventListener('click', () => {
+  const ids = Array.from(document.querySelectorAll('.row-checkbox:checked')).map(cb => cb.dataset.id);
+  if (ids.length === 0) { alert('⚠️ اختر عيب واحد على الأقل'); return; }
+  reviewDefect(ids, 'rejected');
 });
 
 // ============ فلترة ============
@@ -733,6 +787,7 @@ const stationsModal = document.getElementById('stationsModal');
 document.getElementById('stationsBtn').addEventListener('click', () => {
   stationsModal.classList.add('open');
   loadSupervisorsList();
+  loadTechniciansList();
   loadStationsList();
 });
 document.getElementById('stationsClose').addEventListener('click', () => stationsModal.classList.remove('open'));
@@ -752,6 +807,10 @@ document.getElementById('newStageVisibleAll').addEventListener('change', (e) => 
   document.getElementById('newStageSupervisorsWrap').style.display = e.target.checked ? 'none' : 'block';
 });
 
+document.getElementById('newStageTechOpenAll').addEventListener('change', (e) => {
+  document.getElementById('newStageTechWrap').style.display = e.target.checked ? 'none' : 'block';
+});
+
 async function loadSupervisorsList() {
   const { data, error } = await sbClient.from('profiles').select('id, email').eq('role', 'supervisor').order('email');
   allSupervisors = data || [];
@@ -765,16 +824,29 @@ async function loadSupervisorsList() {
   `).join('');
 }
 
+async function loadTechniciansList() {
+  const { data, error } = await sbClient.from('profiles').select('id, email').eq('role', 'technician').order('email');
+  const container = document.getElementById('newStageTechList');
+  if (!data || data.length === 0) {
+    container.innerHTML = '<div style="color:#64748b;font-size:12px;">لا يوجد فنيين مسجلين بعد</div>';
+    return;
+  }
+  container.innerHTML = data.map(t => `
+    <label><input type="checkbox" class="new-stage-tech-cb" value="${t.id}" /> ${t.email}</label>
+  `).join('');
+}
+
 document.getElementById('addStageBtn').addEventListener('click', async () => {
   const name = document.getElementById('newStageName').value.trim();
   const line = document.getElementById('newStageLine').value.trim() || null;
   const visibleAll = document.getElementById('newStageVisibleAll').checked;
+  const techOpenAll = document.getElementById('newStageTechOpenAll').checked;
 
   if (!name) { alert('⚠️ اكتب اسم المحطة'); return; }
 
   try {
     const { data: stage, error } = await sbClient.from('stages').insert([{
-      name, line_no: line, visible_to_all: visibleAll, created_by: currentUser.id
+      name, line_no: line, visible_to_all: visibleAll, technicians_open_to_all: techOpenAll, created_by: currentUser.id
     }]).select().single();
     if (error) throw error;
 
@@ -786,10 +858,20 @@ document.getElementById('addStageBtn').addEventListener('click', async () => {
       }
     }
 
+    if (!techOpenAll) {
+      const selectedTechIds = Array.from(document.querySelectorAll('.new-stage-tech-cb:checked')).map(cb => cb.value);
+      if (selectedTechIds.length > 0) {
+        const rows = selectedTechIds.map(tid => ({ technician_id: tid, stage_id: stage.id }));
+        await sbClient.from('station_technicians').insert(rows);
+      }
+    }
+
     document.getElementById('newStageName').value = '';
     document.getElementById('newStageLine').value = '';
     document.getElementById('newStageVisibleAll').checked = true;
     document.getElementById('newStageSupervisorsWrap').style.display = 'none';
+    document.getElementById('newStageTechOpenAll').checked = true;
+    document.getElementById('newStageTechWrap').style.display = 'none';
 
     loadStationsList();
     loadStagesFilter();
@@ -810,12 +892,14 @@ async function loadStationsList() {
   }
 
   const { data: assignments } = await sbClient.from('station_supervisors').select('stage_id, supervisor_id, profiles(email)');
+  const { data: techAssignments } = await sbClient.from('station_technicians').select('stage_id, technician_id, profiles(email)');
   const { data: defectTypes } = await sbClient.from('defect_types').select('*');
   const { data: referenceCodes } = await sbClient.from('reference_codes').select('*');
 
   container.innerHTML = '';
   stages.forEach(s => {
     const stageSupervisors = (assignments || []).filter(a => a.stage_id === s.id);
+    const stageTechAssignments = (techAssignments || []).filter(a => a.stage_id === s.id);
     const stageDefectTypes = (defectTypes || []).filter(dt => dt.stage_id === s.id);
     const stageRefCodes = (referenceCodes || []).filter(rc => rc.stage_id === s.id);
 
@@ -827,6 +911,7 @@ async function loadStationsList() {
         <button class="small-btn manage-station-btn" data-id="${s.id}">إدارة</button>
       </div>
       <div class="s-meta">${s.visible_to_all ? '👁 مرئية لكل المشرفين' : '🔒 مشرفين محددين: ' + (stageSupervisors.map(a => a.profiles?.email).join(', ') || 'لا يوجد')}</div>
+      <div class="s-meta">${s.technicians_open_to_all ? '👷 مفتوحة لكل الفنيين' : '🔒 فنيين محددين: ' + (stageTechAssignments.map(a => a.profiles?.email).join(', ') || 'لا يوجد')}</div>
       <div class="station-detail" id="detail-${s.id}">
         <label style="color:#94a3b8;font-size:12px;">أنواع العيوب في هذه المحطة:</label>
         <div id="defect-types-${s.id}">
@@ -867,6 +952,10 @@ async function loadStationsList() {
         <div class="excel-upload-row">
           <input type="file" accept=".xlsx,.xls,.csv" class="excel-ref-input" data-stage-id="${s.id}" />
           <button class="excel-ref-upload-btn" data-stage-id="${s.id}">📊 رفع إكسيل (عمود A=جوب أوردر, B=لينك)</button>
+        </div>
+        <div class="excel-upload-row">
+          <input type="file" accept=".xlsx,.xls,.csv" class="excel-ref-serial-input" data-stage-id="${s.id}" />
+          <button class="excel-ref-serial-upload-btn" data-stage-id="${s.id}" style="background:#0891b2; color:white; border:none; padding:6px 14px; border-radius:6px; cursor:pointer; font-size:11px; font-weight:bold; white-space:normal;">📊 رفع إكسيل (عمود A=سيريال كامل، سيُحسب الجوب أوردر تلقائيًا, B=لينك)</button>
         </div>
       </div>
     `;
@@ -957,6 +1046,15 @@ async function loadStationsList() {
       handleReferenceExcelUpload(file, btn.dataset.stageId);
     });
   });
+
+  container.querySelectorAll('.excel-ref-serial-upload-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const fileInput = container.querySelector(`.excel-ref-serial-input[data-stage-id="${btn.dataset.stageId}"]`);
+      const file = fileInput.files[0];
+      if (!file) { alert('⚠️ اختر ملف إكسيل أولاً'); return; }
+      handleReferenceExcelUploadFromSerial(file, btn.dataset.stageId);
+    });
+  });
 }
 
 async function handleReferenceExcelUpload(file, stageId) {
@@ -983,6 +1081,41 @@ async function handleReferenceExcelUpload(file, stageId) {
     if (error) throw error;
 
     alert(`✅ تمت إضافة ${pairs.length} سجل مطابقة من الملف بنجاح`);
+    loadStationsList();
+  } catch (err) {
+    alert('❌ فشل قراءة الملف: ' + err.message);
+    console.error(err);
+  }
+}
+
+// رفع إكسيل بصيغة (عمود A = سيريال كامل، عمود B = لينك) - يحسب الجوب أوردر تلقائيًا
+// ويتجاهل الصفوف اللي فيها "NA" أو لينك فاضي
+async function handleReferenceExcelUploadFromSerial(file, stageId) {
+  try {
+    const data = await file.arrayBuffer();
+    const workbook = XLSX.read(data, { type: 'array' });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+    const pairs = rows
+      .map(r => {
+        const serial = (r && r[0] !== undefined && r[0] !== null) ? String(r[0]).trim() : '';
+        const link = (r && r[1] !== undefined && r[1] !== null) ? String(r[1]).trim() : '';
+        return { serial, link, jobOrder: extractJobOrder(serial) };
+      })
+      .filter(p => p.serial !== '' && p.link !== '' && p.link.toUpperCase() !== 'NA' && p.jobOrder);
+
+    if (pairs.length === 0) {
+      alert('⚠️ لم يتم العثور على بيانات صالحة (تأكد إن عمود A فيه السيريال الكامل وعمود B فيه لينك حقيقي مش NA)');
+      return;
+    }
+
+    const rowsToInsert = pairs.map(p => ({ stage_id: stageId, job_order: p.jobOrder, expected_link: p.link }));
+    const { error } = await sbClient.from('reference_codes').upsert(rowsToInsert, { onConflict: 'stage_id,job_order' });
+    if (error) throw error;
+
+    const skippedCount = rows.length - pairs.length;
+    alert(`✅ تمت إضافة ${pairs.length} سجل مطابقة (تم حساب الجوب أوردر تلقائيًا)${skippedCount > 0 ? `\nتم تجاهل ${skippedCount} صف (بدون لينك حقيقي أو NA)` : ''}`);
     loadStationsList();
   } catch (err) {
     alert('❌ فشل قراءة الملف: ' + err.message);
