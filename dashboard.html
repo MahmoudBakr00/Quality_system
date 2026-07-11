@@ -9,7 +9,7 @@
 <link rel="apple-touch-icon" href="icon-180.png" />
 <meta name="theme-color" content="#3b82f6" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>الداشبورد - نظام تسجيل العيوب</title>
+<title>لوحة التحكم - نظام تسجيل العيوب</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -135,7 +135,7 @@ tr.row-clickable { cursor: pointer; }
 <body>
 <div class="container">
 <div class="header">
-<h1 data-i18n="dashboard">📊 الداشبورد</h1>
+<h1 data-i18n="dashboard">📊 لوحة التحكم</h1>
 <div class="nav-links">
 <a href="home.html" data-i18n="home">🏠 الرئيسية</a>
 <button class="link-btn" id="stationsBtn" style="display:none;" data-i18n="manage_stations">🏭 إدارة المحطات</button>
@@ -198,9 +198,9 @@ tr.row-clickable { cursor: pointer; }
 <table>
 <thead><tr>
   <th id="checkboxHeaderCell" style="display:none;"><input type="checkbox" id="selectAllCheckbox" /></th>
-  <th data-i18n="col_serial">السيريال</th><th>كود العيب</th><th data-i18n="col_job_order">الجوب أوردر</th><th data-i18n="col_station">المحطة</th><th>خط الإنتاج</th><th data-i18n="col_defect_type">نوع العيب</th><th>الصورة</th><th data-i18n="col_status">الحالة</th><th data-i18n="col_technician">الفني</th><th data-i18n="col_date">التاريخ</th><th>مين راجع</th><th>تاريخ الإغلاق</th><th>الملاحظة</th><th></th>
+  <th data-i18n="col_serial">السيريال</th><th>كود العيب</th><th data-i18n="col_job_order">الجوب أوردر</th><th data-i18n="col_station">المحطة</th><th>خط الإنتاج</th><th data-i18n="col_defect_type">نوع العيب</th><th>وصف العيب</th><th>الصورة</th><th data-i18n="col_status">الحالة</th><th data-i18n="col_technician">الفني</th><th data-i18n="col_date">التاريخ</th><th>المُراجِع</th><th>تاريخ الإغلاق</th><th>ملاحظة المراجعة</th><th></th>
 </tr></thead>
-<tbody id="tbody"><tr><td colspan="15" class="loading">⏳ جاري التحميل...</td></tr></tbody>
+<tbody id="tbody"><tr><td colspan="16" class="loading">⏳ جاري التحميل...</td></tr></tbody>
 </table>
 </div>
 </div>
@@ -244,7 +244,7 @@ tr.row-clickable { cursor: pointer; }
 </div>
 </div>
 
-<!-- مودال إدارة المحطات (أدمن فقط) -->
+<!-- مودال إدارة المحطات (مدير نظام فقط) -->
 <div class="modal-overlay" id="stationsModal">
 <div class="modal-box" style="max-width:650px;">
 <h3>🏭 إدارة محطات الفحص</h3>
@@ -380,7 +380,7 @@ document.getElementById('photoLightboxClose').addEventListener('click', () => {
 // ============ تحميل العيوب ============
 async function loadDefects() {
   const tbody = document.getElementById('tbody');
-  tbody.innerHTML = `<tr><td colspan="15" class="loading">⏳ جاري التحميل...</td></tr>`;
+  tbody.innerHTML = `<tr><td colspan="16" class="loading">⏳ جاري التحميل...</td></tr>`;
 
   const stageId = document.getElementById('filterStage').value;
   const status = document.getElementById('filterStatus').value;
@@ -473,7 +473,7 @@ async function renderSerialHistoryPanel(searchTerm) {
     data = result.data;
     error = result.error;
   } catch (err) {
-    body.innerHTML = '<div style="color:#64748b; font-size:13px;">📴 مفيش اتصال بالنت - سجل التعديلات مش متاح دلوقتي</div>';
+    body.innerHTML = '<div style="color:#64748b; font-size:13px;">📴 لا يوجد اتصال بالإنترنت، سجل التعديلات غير متاح حاليًا</div>';
     return;
   }
 
@@ -496,7 +496,7 @@ async function renderSerialHistoryPanel(searchTerm) {
 function renderTable() {
   const tbody = document.getElementById('tbody');
   if (allDefects.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="15" class="no-data">📭 لا توجد عيوب مطابقة</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="16" class="no-data">📭 لا توجد عيوب مطابقة</td></tr>`;
     renderParetoChart();
     return;
   }
@@ -506,7 +506,7 @@ function renderTable() {
     const tr = document.createElement('tr');
     tr.className = 'row-clickable';
     const canReview = currentRole === 'admin' || currentRole === 'supervisor';
-    // الأدمن يقدر يعدّل قرار أي عيب في أي وقت (حتى بعد ما يتاخد قرار قبل كده)
+    // مدير النظام يقدر يعدّل قرار أي عيب في أي وقت (حتى بعد ما يتاخد قرار قبل كده)
     // المشرف بس يقدر يتصرف وهو لسه "قيد المراجعة" وعلى محطة هو مسؤول عنها فعلاً
     const supervisorCanReviewThis = currentRole !== 'supervisor' || (supervisorAllowedStageIds && supervisorAllowedStageIds.has(d.stage_id));
     const showActions = currentRole === 'admin' || (canReview && d.status === 'pending' && supervisorCanReviewThis);
@@ -520,6 +520,7 @@ function renderTable() {
       <td>${d.stages ? d.stages.name : '-'}</td>
       <td>${d.stages && d.stages.line_no ? d.stages.line_no : '-'}</td>
       <td>${d.defect_type_name || '-'}</td>
+      <td style="max-width:180px; white-space:normal; font-size:11px;">${d.description || '-'}</td>
       <td onclick="event.stopPropagation()">${d.photo_url ? `<img src="${d.photo_url}" class="thumb-img" data-full="${d.photo_url}" style="width:36px; height:36px; object-fit:cover; border-radius:6px; cursor:pointer;" />` : '-'}</td>
       <td><span class="status-badge ${d.status}">${statusText[d.status]}</span></td>
       <td>${d.technician_email ? d.technician_email.split('@')[0] : '-'}</td>
@@ -874,14 +875,14 @@ async function openDefectFromUrlIfPresent() {
     .maybeSingle();
 
   if (error || !data) {
-    alert('⚠️ تعذر العثور على العيب المطلوب (ربما اتحذف أو مش عندك صلاحية تشوفه)');
+    alert('⚠️ تعذّر العثور على العيب المطلوب (ربما تم حذفه أو لا تملك صلاحية عرضه)');
     return;
   }
 
   openHistoryModal(data);
 }
 
-// ============ إدارة المحطات (أدمن فقط) ============
+// ============ إدارة المحطات (مدير نظام فقط) ============
 const stationsModal = document.getElementById('stationsModal');
 document.getElementById('stationsBtn').addEventListener('click', async () => {
   stationsModal.classList.add('open');
@@ -1054,7 +1055,7 @@ async function loadStationsList() {
         </div>
 
         <hr style="border-color:#475569; margin:14px 0;" />
-        <label style="color:#94a3b8;font-size:12px;">🔍 قاعدة بيانات مطابقة الفحص (جوب أوردر ← لينك متوقع):</label>
+        <label style="color:#94a3b8;font-size:12px;">🔍 قاعدة بيانات مطابقة الفحص (جوب أوردر ← رابط متوقع):</label>
                 <div id="ref-codes-${s.id}" style="max-height:120px; overflow-y:auto; margin:8px 0;">
           ${stageRefCodes.map(rc => `
             <div style="display:flex; align-items:center; gap:6px; font-size:11px; color:#cbd5e1; padding:2px 0;">
@@ -1070,16 +1071,16 @@ async function loadStationsList() {
         </div>
         <div style="display:flex; gap:6px; margin-top:8px;">
           <input type="text" placeholder="جوب أوردر" class="new-ref-joborder" style="flex:1; padding:6px 10px; border:none; border-radius:6px; background:#334155; color:#f1f5f9; font-size:12px;" />
-          <input type="text" placeholder="اللينك المتوقع" class="new-ref-link" style="flex:2; padding:6px 10px; border:none; border-radius:6px; background:#334155; color:#f1f5f9; font-size:12px;" />
+          <input type="text" placeholder="الرابط المتوقع" class="new-ref-link" style="flex:2; padding:6px 10px; border:none; border-radius:6px; background:#334155; color:#f1f5f9; font-size:12px;" />
           <button class="small-btn add-ref-btn" data-stage-id="${s.id}">➕</button>
         </div>
         <div class="excel-upload-row">
           <input type="file" accept=".xlsx,.xls,.csv" class="excel-ref-input" data-stage-id="${s.id}" />
-          <button class="excel-ref-upload-btn" data-stage-id="${s.id}">📊 رفع إكسيل (عمود A=جوب أوردر, B=لينك)</button>
+          <button class="excel-ref-upload-btn" data-stage-id="${s.id}">📊 رفع إكسيل (عمود A=جوب أوردر, B=رابط)</button>
         </div>
         <div class="excel-upload-row">
           <input type="file" accept=".xlsx,.xls,.csv" class="excel-ref-serial-input" data-stage-id="${s.id}" />
-          <button class="excel-ref-serial-upload-btn" data-stage-id="${s.id}" style="background:#0891b2; color:white; border:none; padding:6px 14px; border-radius:6px; cursor:pointer; font-size:11px; font-weight:bold; white-space:normal;">📊 رفع إكسيل (عمود A=سيريال كامل، سيُحسب الجوب أوردر تلقائيًا, B=لينك)</button>
+          <button class="excel-ref-serial-upload-btn" data-stage-id="${s.id}" style="background:#0891b2; color:white; border:none; padding:6px 14px; border-radius:6px; cursor:pointer; font-size:11px; font-weight:bold; white-space:normal;">📊 رفع إكسيل (عمود A=سيريال كامل، سيُحسب الجوب أوردر تلقائيًا, B=رابط)</button>
         </div>
       </div>
     `;
@@ -1193,13 +1194,13 @@ async function loadStationsList() {
     });
   });
 
-  // ============ قاعدة بيانات المطابقة (جوب أوردر ← لينك) ============
+  // ============ قاعدة بيانات المطابقة (جوب أوردر ← رابط) ============
   container.querySelectorAll('.add-ref-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       const wrap = btn.parentElement;
       const jobOrder = wrap.querySelector('.new-ref-joborder').value.trim();
       const link = wrap.querySelector('.new-ref-link').value.trim();
-      if (!jobOrder || !link) { alert('⚠️ اكتب الجوب أوردر واللينك'); return; }
+      if (!jobOrder || !link) { alert('⚠️ اكتب الجوب أوردر والرابط'); return; }
       const { error } = await sbClient.from('reference_codes').upsert(
         [{ stage_id: btn.dataset.stageId, job_order: jobOrder, expected_link: link }],
         { onConflict: 'stage_id,job_order' }
@@ -1256,7 +1257,7 @@ async function handleReferenceExcelUpload(file, stageId) {
       .filter(p => p.jobOrder !== '' && p.link !== '');
 
     if (pairs.length === 0) {
-      alert('⚠️ لم يتم العثور على بيانات صالحة (عمود A = جوب أوردر, عمود B = لينك)');
+      alert('⚠️ لم يتم العثور على بيانات صالحة (عمود A = جوب أوردر, عمود B = رابط)');
       return;
     }
 
@@ -1272,8 +1273,8 @@ async function handleReferenceExcelUpload(file, stageId) {
   }
 }
 
-// رفع إكسيل بصيغة (عمود A = سيريال كامل، عمود B = لينك) - يحسب الجوب أوردر تلقائيًا
-// ويتجاهل الصفوف اللي فيها "NA" أو لينك فاضي
+// رفع إكسيل بصيغة (عمود A = سيريال كامل، عمود B = رابط) - يحسب الجوب أوردر تلقائيًا
+// ويتجاهل الصفوف اللي فيها "NA" أو رابط فاضي
 async function handleReferenceExcelUploadFromSerial(file, stageId) {
   try {
     const data = await file.arrayBuffer();
@@ -1290,7 +1291,7 @@ async function handleReferenceExcelUploadFromSerial(file, stageId) {
       .filter(p => p.serial !== '' && p.link !== '' && p.link.toUpperCase() !== 'NA' && p.jobOrder);
 
     if (pairs.length === 0) {
-      alert('⚠️ لم يتم العثور على بيانات صالحة (تأكد إن عمود A فيه السيريال الكامل وعمود B فيه لينك حقيقي مش NA)');
+      alert('⚠️ لم يتم العثور على بيانات صالحة. تأكد أن العمود A يحتوي على السيريال الكامل، وأن العمود B يحتوي على رابط حقيقي وليس NA');
       return;
     }
 
@@ -1299,7 +1300,7 @@ async function handleReferenceExcelUploadFromSerial(file, stageId) {
     if (error) throw error;
 
     const skippedCount = rows.length - pairs.length;
-    alert(`✅ تمت إضافة ${pairs.length} سجل مطابقة (تم حساب الجوب أوردر تلقائيًا)${skippedCount > 0 ? `\nتم تجاهل ${skippedCount} صف (بدون لينك حقيقي أو NA)` : ''}`);
+    alert(`✅ تمت إضافة ${pairs.length} سجل مطابقة (تم حساب الجوب أوردر تلقائيًا)${skippedCount > 0 ? `\nتم تجاهل ${skippedCount} صف (بدون رابط حقيقي أو NA)` : ''}`);
     loadStationsList();
   } catch (err) {
     alert('❌ فشل قراءة الملف: ' + err.message);
