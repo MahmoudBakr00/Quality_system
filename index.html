@@ -203,6 +203,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
     if (profileError || !profile) { errorMsg.textContent = '⚠️ لم يتم العثور على بيانات المستخدم'; return; }
 
     saveRememberedEmail(email);
+    localStorage.setItem('cached_user_role', profile.role);
     syncAllDataForOffline(); // بدء تنزيل كل البيانات في الخلفية (مش لازم نستناها عشان الدخول ميتأخرش)
 
     window.location.href = 'home.html';
