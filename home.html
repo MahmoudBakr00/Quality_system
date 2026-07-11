@@ -34,6 +34,7 @@ body { background: #0f172a; padding: 20px; color: #f1f5f9; min-height: 100vh; }
 <div class="header">
 <div class="user-info">👤 <span id="userEmail">-</span> <span class="role-badge" id="roleBadge">-</span></div>
 <div style="display:flex; gap:10px; align-items:center;">
+<div id="notifBellWrap"></div>
 <a href="change-password.html" data-i18n="change_password" style="color:#93c5fd; text-decoration:none; background:#334155; padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600;">🔑 تغيير كلمة المرور</a>
 <div id="langToggleWrap"></div>
 <button class="logout-btn" id="logoutBtn" data-i18n="logout">تسجيل خروج</button>
@@ -91,6 +92,7 @@ async function checkAuth() {
 
   document.getElementById('userEmail').textContent = user.email;
   document.getElementById('roleBadge').textContent = getRoleName(profile.role) || profile.role;
+  renderNotificationBell('notifBellWrap', user.id);
 
   // مزامنة كل البيانات في الخلفية (لو فيه نت) عشان تفضل محدّثة للعمل بدون نت لاحقًا
   syncAllDataForOffline();
