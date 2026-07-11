@@ -135,6 +135,7 @@ tr.row-clickable { cursor: pointer; }
 <a href="home.html" data-i18n="home">🏠 الرئيسية</a>
 <button class="link-btn" id="stationsBtn" style="display:none;" data-i18n="manage_stations">🏭 إدارة المحطات</button>
 <a href="admin-users.html" id="usersLink" style="display:none;" data-i18n="manage_users">👥 إدارة المستخدمين</a>
+<div id="notifBellWrap"></div>
 <div id="langToggleWrap"></div>
 <button class="logout-btn" id="logoutBtn" data-i18n="logout">تسجيل خروج</button>
 </div>
@@ -286,6 +287,7 @@ async function init() {
   if (!auth) return;
   currentUser = auth.user;
   currentRole = auth.role;
+  renderNotificationBell('notifBellWrap', auth.user.id);
 
   if (currentRole === 'admin') {
     document.getElementById('stationsBtn').style.display = 'inline-block';
