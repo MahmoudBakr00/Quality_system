@@ -171,6 +171,7 @@ async function init() {
   currentUser = auth.user;
   currentRole = auth.role;
   document.getElementById('userEmail').textContent = auth.user.email;
+  syncAllDataForOffline(); // تحديث الكاش الكامل في الخلفية كل ما الصفحة دي تتفتح وفيه نت
   loadStages();
 }
 init();
