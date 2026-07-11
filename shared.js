@@ -522,7 +522,15 @@ function renderNotificationBell(containerId, userId) {
 
     container.querySelectorAll('.notif-item-row').forEach(row => {
       row.addEventListener('click', async () => {
+        const notif = data.find(n => n.id === row.dataset.id);
         await sbClient.from('notifications').update({ is_read: true }).eq('id', row.dataset.id);
+
+        // لو الإشعار مرتبط بعيب، وديه مباشرة لتفاصيله في الداشبورد
+        if (notif && notif.type === 'defect' && notif.related_id) {
+          window.location.href = 'dashboard.html?defect_id=' + notif.related_id;
+          return;
+        }
+
         fetchAndRender();
       });
     });
