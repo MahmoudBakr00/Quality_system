@@ -171,7 +171,7 @@ async function init() {
   currentUser = auth.user;
   currentRole = auth.role;
   document.getElementById('userEmail').textContent = auth.user.email;
-  syncAllDataForOffline(); // تحديث الكاش الكامل في الخلفية كل ما الصفحة دي تتفتح وفيه نت
+  syncFormDataForOffline(); // نسخة خفيفة (محطات + أنواع عيوب بس) عشان الصفحة متبطأش
   loadStages();
 }
 init();
@@ -309,6 +309,24 @@ document.getElementById('defectForm').addEventListener('submit', async (e) => {
     technician_email: currentUser.email,
   };
 
+  // تحقق من وجود عيوب مسجلة قبل كده بنفس التفاصيل (سيريال + محطة + نوع العيب)
+  // ده مجرد تنبيه، مش مانع - الفني يقدر يكمل التسجيل عادي بعد ما يشوف الرسالة
+  if (navigator.onLine) {
+    try {
+      let dupQuery = sbClient.from('defects').select('id', { count: 'exact', head: true })
+        .eq('serial_number', serial)
+        .eq('stage_id', stageId);
+      dupQuery = defectTypeId ? dupQuery.eq('defect_type_id', defectTypeId) : dupQuery.is('defect_type_id', null);
+
+      const { count } = await dupQuery;
+      if (count && count > 0) {
+        alert(`⚠️ تنبيه: العيب ده اتسجل قبل كده ${count} مرة بنفس السيريال والمحطة ونوع العيب. هيتم تسجيله برضه عادي.`);
+      }
+    } catch (err) {
+      console.warn('فشل فحص التكرار (تجاهل واستمر):', err);
+    }
+  }
+
   // رفع الصورة أولاً لو موجودة ومتصل بالنت (الصور مش مدعومة أوفلاين حاليًا)
   if (compressedPhotoBlob && navigator.onLine) {
     try {
@@ -334,10 +352,12 @@ document.getElementById('defectForm').addEventListener('submit', async (e) => {
       throw new Error('offline');
     }
 
-    const { error } = await sbClient.from('defects').insert([defectPayload]);
+    const { data: insertedData, error } = await sbClient.from('defects').insert([defectPayload]).select('defect_code').single();
     if (error) throw error;
 
-    successMsg.textContent = '✅ تم تسجيل العيب بنجاح!';
+    successMsg.textContent = insertedData?.defect_code
+      ? `✅ تم تسجيل العيب بنجاح! كود العيب: ${insertedData.defect_code}`
+      : '✅ تم تسجيل العيب بنجاح!';
     successMsg.style.display = 'block';
     document.getElementById('defectForm').reset(); compressedPhotoBlob = null; document.getElementById('photoPreviewWrap').style.display = 'none';
     document.getElementById('jobOrderPreview').style.display = 'none';
