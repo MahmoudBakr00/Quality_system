@@ -108,6 +108,7 @@ textarea { resize: vertical; min-height: 80px; }
 <script src="shared.js"></script>
 <script>
 let currentUser = null;
+let currentRole = null;
 let currentScanner = null;
 let compressedPhotoBlob = null;
 
@@ -168,6 +169,7 @@ async function init() {
   const auth = await requireAuth();
   if (!auth) return;
   currentUser = auth.user;
+  currentRole = auth.role;
   document.getElementById('userEmail').textContent = auth.user.email;
   loadStages();
 }
@@ -178,10 +180,21 @@ async function loadStages() {
   try {
     const { data, error } = await sbClient.from('stages').select('*').order('name');
     if (error) throw error;
-    cacheStages(data);
-    renderStagesOptions(data);
+
+    let allowedStages = data;
+    // لو مش أدمن، فلتر المحطات على أساس صلاحية الفني
+    if (currentRole !== 'admin') {
+      const { data: assignments } = await sbClient
+        .from('station_technicians')
+        .select('stage_id')
+        .eq('technician_id', currentUser.id);
+      const assignedIds = new Set((assignments || []).map(a => a.stage_id));
+      allowedStages = data.filter(s => s.technicians_open_to_all || assignedIds.has(s.id));
+    }
+
+    cacheStages(allowedStages);
+    renderStagesOptions(allowedStages);
   } catch (err) {
-    // فشل التحميل (غالبًا مفيش نت) - استخدم النسخة المحفوظة محليًا لو موجودة
     const cached = getCachedStages();
     if (cached.length > 0) {
       renderStagesOptions(cached);
