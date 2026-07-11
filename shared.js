@@ -554,7 +554,24 @@ function renderNotificationBell(containerId, userId) {
   });
 
   fetchAndRender();
-  setInterval(fetchAndRender, 30000); // فحص كل 30 ثانية لإشعارات جديدة
+  setInterval(fetchAndRender, 30000); // نسخة احتياطية لو الاتصال اللحظي انقطع لأي سبب
+
+  // اشتراك لحظي (Realtime): أي إشعار جديد يوصل فورًا من غير استنى الفحص الدوري
+  try {
+    sbClient
+      .channel('notifications-' + userId)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'notifications',
+        filter: `user_id=eq.${userId}`,
+      }, () => {
+        fetchAndRender();
+      })
+      .subscribe();
+  } catch (e) {
+    console.warn('فشل الاشتراك اللحظي للإشعارات، هيتم الاعتماد على الفحص الدوري بس:', e);
+  }
 }
 
 // =========================================================
