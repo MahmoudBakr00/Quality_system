@@ -276,6 +276,7 @@ tr.row-clickable { cursor: pointer; }
 let currentUser = null;
 let currentRole = null;
 let allDefects = [];
+let supervisorAllowedStageIds = null; // بس للمشرف: المحطات اللي يقدر يعتمد/يرفض عليها
 let allSupervisors = [];
 
 async function init() {
@@ -297,8 +298,29 @@ async function init() {
     document.getElementById('bulkRejectBtn').style.display = 'inline-block';
   }
 
+  if (currentRole === 'supervisor') {
+    await loadSupervisorAllowedStages();
+  }
+
   loadStagesFilter();
   loadDefects();
+}
+
+// بيحمّل المحطات اللي المشرف الحالي يقدر يعتمد/يرفض عليها (مفتوحة للكل أو مخصصة له)
+async function loadSupervisorAllowedStages() {
+  try {
+    const [{ data: allStages }, { data: assignments }] = await Promise.all([
+      sbClient.from('stages').select('id, visible_to_all'),
+      sbClient.from('station_supervisors').select('stage_id').eq('supervisor_id', currentUser.id),
+    ]);
+    const assignedIds = new Set((assignments || []).map(a => a.stage_id));
+    supervisorAllowedStageIds = new Set(
+      (allStages || []).filter(s => s.visible_to_all || assignedIds.has(s.id)).map(s => s.id)
+    );
+  } catch (err) {
+    console.warn('فشل تحميل صلاحيات المشرف على المحطات:', err);
+    supervisorAllowedStageIds = new Set(); // لو فشل، الأسلم إننا منظهرش أزرار غلط
+  }
 }
 init();
 
@@ -454,9 +476,10 @@ function renderTable() {
     tr.className = 'row-clickable';
     const canReview = currentRole === 'admin' || currentRole === 'supervisor';
     // الأدمن يقدر يعدّل قرار أي عيب في أي وقت (حتى بعد ما يتاخد قرار قبل كده)
-    // المشرف بس يقدر يتصرف وهو لسه "قيد المراجعة"
-    const showActions = currentRole === 'admin' || (canReview && d.status === 'pending');
-    const canSelect = currentRole === 'admin' || currentRole === 'supervisor';
+    // المشرف بس يقدر يتصرف وهو لسه "قيد المراجعة" وعلى محطة هو مسؤول عنها فعلاً
+    const supervisorCanReviewThis = currentRole !== 'supervisor' || (supervisorAllowedStageIds && supervisorAllowedStageIds.has(d.stage_id));
+    const showActions = currentRole === 'admin' || (canReview && d.status === 'pending' && supervisorCanReviewThis);
+    const canSelect = currentRole === 'admin' || (currentRole === 'supervisor' && supervisorCanReviewThis);
 
     tr.innerHTML = `
       ${canSelect ? `<td onclick="event.stopPropagation()"><input type="checkbox" class="row-checkbox" data-id="${d.id}" data-status="${d.status}" /></td>` : ''}
