@@ -12,13 +12,13 @@ const TRANSLATIONS = {
   ar: {
     login: 'تسجيل الدخول', register_tab: 'تسجيل حساب جديد', login_tab: 'دخول',
     email_label: 'البريد الإلكتروني', password_label: 'كلمة المرور', role_label: 'الدور',
-    role_technician: 'فني', role_supervisor: 'مشرف', role_admin: 'أدمن',
+    role_technician: 'فني', role_supervisor: 'مشرف', role_admin: 'مدير النظام',
     login_btn: 'دخول', create_account_btn: 'إنشاء الحساب',
-    supervisor_hint: 'حسابات المشرفين (Supervisor) تُنشأ فقط من لوحة تحكم الأدمن.',
-    admin_code_label: 'كود تفعيل الأدمن', forgot_password: 'نسيت كلمة المرور؟',
+    supervisor_hint: 'تُنشأ حسابات المشرفين فقط من لوحة تحكم مدير النظام.',
+    admin_code_label: 'كود تفعيل مدير النظام', forgot_password: 'نسيت كلمة المرور؟',
     send_reset_link: '📩 إرسال رابط إعادة التعيين', cancel_back_login: 'إلغاء والرجوع لتسجيل الدخول',
     reset_password_title: '🔑 إعادة تعيين كلمة المرور', footer_text: 'نظام تسجيل ومتابعة العيوب',
-    home: '🏠 الرئيسية', logout: 'تسجيل خروج', dashboard: '📊 الداشبورد',
+    home: '🏠 الرئيسية', logout: 'تسجيل خروج', dashboard: '📊 لوحة التحكم',
     register_defect_title: '🔍 تسجيل عيب', track_product_title: '📦 تتبع منتج',
     register_defect_desc: 'سكان بالكاميرا أو كتابة السيريال يدويًا',
     track_product_desc: 'اعرف كل ما حدث للمنتج في كل المحطات',
@@ -35,7 +35,7 @@ const TRANSLATIONS = {
     delete_selected: '🗑 حذف المحدد', print_report: '🖨️ طباعة / حفظ كـ PDF',
     col_serial: 'السيريال', col_job_order: 'الجوب أوردر', col_station: 'المحطة',
     col_defect_type: 'نوع العيب', col_status: 'الحالة', col_technician: 'الفني', col_date: 'التاريخ',
-    add_new_user: '➕ إضافة مستخدم جديد (مشرف / أدمن / فني)',
+    add_new_user: '➕ إضافة مستخدم جديد (مشرف / مدير نظام / فني)',
     registered_users: '📋 المستخدمين المسجلين', create_account: '➕ إنشاء حساب',
   },
   en: {
@@ -306,31 +306,67 @@ function getPendingCount() {
 function queueDefectOffline(defectData) {
   const queue = getPendingQueue();
   const localId = 'local_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  // معرّف فريد بيتبعت مع العيب نفسه لقاعدة البيانات، عشان لو حصل أي تكرار
+  // في محاولة المزامنة (من تاب تاني مثلاً)، قاعدة البيانات ترفض النسخة الزيادة تلقائيًا
+  if (!defectData.client_ref_id) {
+    defectData.client_ref_id = localId;
+  }
   queue.push({ localId, data: defectData, queuedAt: new Date().toISOString() });
   savePendingQueue(queue);
   return localId;
 }
 
 // يحاول يرفع كل العيوب المحفوظة محليًا لما الاتصال يرجع
+let isSyncingDefects = false; // قفل يمنع تنفيذ المزامنة أكتر من مرة في نفس اللحظة
+
 async function syncPendingDefects() {
-  const queue = getPendingQueue();
-  if (queue.length === 0) return { synced: 0, failed: 0 };
-
-  let synced = 0;
-  const remaining = [];
-
-  for (const item of queue) {
-    try {
-      const { error } = await sbClient.from('defects').insert([item.data]);
-      if (error) throw error;
-      synced++;
-    } catch (e) {
-      remaining.push(item); // نسيبه في الطابور نحاول تاني بعدين
-    }
+  if (isSyncingDefects) {
+    // في مزامنة شغالة بالفعل، منعملش حاجة عشان منرفعش نفس العيوب مرتين
+    return { synced: 0, failed: 0 };
   }
+  isSyncingDefects = true;
 
-  savePendingQueue(remaining);
-  return { synced, failed: remaining.length };
+  try {
+    const queue = getPendingQueue();
+    if (queue.length === 0) return { synced: 0, failed: 0 };
+
+    // نفضّي الطابور فورًا (قبل ما نبدأ نرفع) عشان أي محاولة مزامنة تانية
+    // تحصل في نفس اللحظة متلاقيش نفس العناصر تاني
+    savePendingQueue([]);
+
+    let synced = 0;
+    const remaining = [];
+
+    for (const item of queue) {
+      try {
+        const { error } = await sbClient.from('defects').insert([item.data]);
+        if (error) {
+          // لو الخطأ بسبب تكرار client_ref_id، معناه العيب ده اتسجل بنجاح
+          // فعلاً من قبل (غالبًا من تاب تاني كان بيزامن في نفس اللحظة) - نعتبرها نجحت
+          const isDuplicate = error.code === '23505' || (error.message || '').includes('client_ref_id');
+          if (isDuplicate) {
+            synced++;
+          } else {
+            throw error;
+          }
+        } else {
+          synced++;
+        }
+      } catch (e) {
+        remaining.push(item); // نسيبه في الطابور نحاول تاني بعدين
+      }
+    }
+
+    if (remaining.length > 0) {
+      // ندمج أي عناصر جديدة اتضافت أثناء ما إحنا بنرفع، مع العناصر اللي فشلت
+      const currentQueue = getPendingQueue();
+      savePendingQueue([...currentQueue, ...remaining]);
+    }
+
+    return { synced, failed: remaining.length };
+  } finally {
+    isSyncingDefects = false;
+  }
 }
 
 // يحفظ نسخة من المحطات/أنواع العيوب محليًا كل ما نجحنا نجيبها أونلاين
@@ -629,23 +665,22 @@ function renderPendingBadge(containerId) {
     container.appendChild(badge);
     document.getElementById('manualSyncBtn').addEventListener('click', async () => {
       const result = await syncPendingDefects();
-      alert(`✅ تمت مزامنة ${result.synced} عيب${result.failed > 0 ? ` (لسه فيه ${result.failed} فشل، هيتحاول تاني)` : ''}`);
+      alert(`✅ تمت مزامنة ${result.synced} عيب${result.failed > 0 ? ` (لا يزال هناك ${result.failed} عنصر لم تتم مزامنته بنجاح، وستتم إعادة المحاولة لاحقًا)` : ''}`);
       update();
     });
   }
 
   update();
-  window.addEventListener('online', async () => {
-    await syncPendingDefects();
-    update();
-  });
+  window.addEventListener('online', update); // بس تحديث الشارة، المزامنة الفعلية بتحصل من مكان واحد مركزي تحت
+  window.addEventListener('defects-synced', update); // تحديث فوري بمجرد ما المزامنة المركزية تخلص
   // إعادة فحص كل شوية في حالة نجاح المزامنة من صفحة تانية
   setInterval(update, 5000);
 }
 
-// عند رجوع الاتصال في أي صفحة، حاول مزامنة الطابور تلقائيًا في الخلفية
-window.addEventListener('online', () => {
-  syncPendingDefects();
+// عند رجوع الاتصال في أي صفحة، حاول مزامنة الطابور تلقائيًا في الخلفية (مكان واحد فقط)
+window.addEventListener('online', async () => {
+  await syncPendingDefects();
+  window.dispatchEvent(new CustomEvent('defects-synced'));
 });
 
 // =========================================================
