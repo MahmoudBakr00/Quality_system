@@ -288,6 +288,7 @@ let currentRole = null;
 let allDefects = [];
 let supervisorAllowedStageIds = null; // بس للمشرف: المحطات اللي يقدر يعتمد/يرفض عليها
 let allSupervisors = [];
+let allTechnicians = [];
 
 async function init() {
   applyTranslations();
@@ -864,10 +865,9 @@ async function openDefectFromUrlIfPresent() {
 
 // ============ إدارة المحطات (أدمن فقط) ============
 const stationsModal = document.getElementById('stationsModal');
-document.getElementById('stationsBtn').addEventListener('click', () => {
+document.getElementById('stationsBtn').addEventListener('click', async () => {
   stationsModal.classList.add('open');
-  loadSupervisorsList();
-  loadTechniciansList();
+  await Promise.all([loadSupervisorsList(), loadTechniciansList()]);
   loadStationsList();
 });
 document.getElementById('stationsClose').addEventListener('click', () => stationsModal.classList.remove('open'));
@@ -906,12 +906,13 @@ async function loadSupervisorsList() {
 
 async function loadTechniciansList() {
   const { data, error } = await sbClient.from('profiles').select('id, email').eq('role', 'technician').order('email');
+  allTechnicians = data || [];
   const container = document.getElementById('newStageTechList');
-  if (!data || data.length === 0) {
+  if (!allTechnicians.length) {
     container.innerHTML = '<div style="color:#64748b;font-size:12px;">لا يوجد فنيين مسجلين بعد</div>';
     return;
   }
-  container.innerHTML = data.map(t => `
+  container.innerHTML = allTechnicians.map(t => `
     <label><input type="checkbox" class="new-stage-tech-cb" value="${t.id}" /> ${t.email}</label>
   `).join('');
 }
@@ -963,6 +964,8 @@ document.getElementById('addStageBtn').addEventListener('click', async () => {
 
 async function loadStationsList() {
   const container = document.getElementById('stationsList');
+  // نتذكر أي بانل كان مفتوح قبل إعادة التحميل عشان نرجعه مفتوح بعدها (تجربة استخدام أنعم)
+  const openIds = Array.from(container.querySelectorAll('.station-detail.open')).map(el => el.id.replace('detail-', ''));
   container.innerHTML = '<div class="loading">⏳ جاري التحميل...</div>';
 
   const { data: stages, error } = await sbClient.from('stages').select('*').order('created_at', { ascending: false });
@@ -993,6 +996,29 @@ async function loadStationsList() {
       <div class="s-meta">${s.visible_to_all ? '👁 مرئية لكل المشرفين' : '🔒 مشرفين محددين: ' + (stageSupervisors.map(a => a.profiles?.email).join(', ') || 'لا يوجد')}</div>
       <div class="s-meta">${s.technicians_open_to_all ? '👷 مفتوحة لكل الفنيين' : '🔒 فنيين محددين: ' + (stageTechAssignments.map(a => a.profiles?.email).join(', ') || 'لا يوجد')}</div>
       <div class="station-detail" id="detail-${s.id}">
+        <label style="color:#94a3b8;font-size:12px; display:block; margin-bottom:6px;">👨‍💼 تعديل المشرفين المسؤولين:</label>
+        <div class="checkbox-row">
+          <input type="checkbox" class="edit-visible-all-cb" data-station-id="${s.id}" ${s.visible_to_all ? 'checked' : ''} />
+          <label style="margin:0; font-size:12px;">مرئية لكل المشرفين</label>
+        </div>
+        <div class="supervisor-list edit-supervisors-wrap" data-station-id="${s.id}" style="${s.visible_to_all ? 'display:none;' : ''}">
+          ${allSupervisors.length === 0 ? '<div style="color:#64748b;font-size:12px;">لا يوجد مشرفين مسجلين</div>' : allSupervisors.map(sup => `
+            <label><input type="checkbox" class="edit-supervisor-cb" data-station-id="${s.id}" data-supervisor-id="${sup.id}" ${stageSupervisors.some(a => a.supervisor_id === sup.id) ? 'checked' : ''} /> ${sup.email}</label>
+          `).join('')}
+        </div>
+
+        <label style="color:#94a3b8;font-size:12px; display:block; margin:12px 0 6px;">👷 تعديل الفنيين المسموح لهم:</label>
+        <div class="checkbox-row">
+          <input type="checkbox" class="edit-tech-open-all-cb" data-station-id="${s.id}" ${s.technicians_open_to_all ? 'checked' : ''} />
+          <label style="margin:0; font-size:12px;">مفتوحة لكل الفنيين</label>
+        </div>
+        <div class="supervisor-list edit-technicians-wrap" data-station-id="${s.id}" style="${s.technicians_open_to_all ? 'display:none;' : ''}">
+          ${allTechnicians.length === 0 ? '<div style="color:#64748b;font-size:12px;">لا يوجد فنيين مسجلين</div>' : allTechnicians.map(tech => `
+            <label><input type="checkbox" class="edit-technician-cb" data-station-id="${s.id}" data-technician-id="${tech.id}" ${stageTechAssignments.some(a => a.technician_id === tech.id) ? 'checked' : ''} /> ${tech.email}</label>
+          `).join('')}
+        </div>
+
+        <hr style="border-color:#475569; margin:14px 0;" />
         <label style="color:#94a3b8;font-size:12px;">أنواع العيوب في هذه المحطة:</label>
         <div id="defect-types-${s.id}">
           ${stageDefectTypes.map(dt => `<span class="defect-type-tag"><input type="checkbox" class="dt-checkbox" data-dt-id="${dt.id}" /> ${dt.name} <button data-dt-id="${dt.id}" class="remove-dt-btn">×</button></span>`).join('') || '<span style="color:#64748b;font-size:12px;">لا يوجد</span>'}
@@ -1045,6 +1071,66 @@ async function loadStationsList() {
   container.querySelectorAll('.manage-station-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.getElementById('detail-' + btn.dataset.id).classList.toggle('open');
+    });
+  });
+
+  openIds.forEach(id => {
+    const el = document.getElementById('detail-' + id);
+    if (el) el.classList.add('open');
+  });
+
+  // ============ تعديل صلاحيات المحطة (مشرفين/فنيين) ============
+  container.querySelectorAll('.edit-visible-all-cb').forEach(cb => {
+    cb.addEventListener('click', (e) => e.stopPropagation());
+    cb.addEventListener('change', async () => {
+      const stationId = cb.dataset.stationId;
+      const { error } = await sbClient.from('stages').update({ visible_to_all: cb.checked }).eq('id', stationId);
+      if (error) { alert('❌ ' + error.message); return; }
+      container.querySelector(`.edit-supervisors-wrap[data-station-id="${stationId}"]`).style.display = cb.checked ? 'none' : 'block';
+      loadStationsList();
+    });
+  });
+
+  container.querySelectorAll('.edit-tech-open-all-cb').forEach(cb => {
+    cb.addEventListener('click', (e) => e.stopPropagation());
+    cb.addEventListener('change', async () => {
+      const stationId = cb.dataset.stationId;
+      const { error } = await sbClient.from('stages').update({ technicians_open_to_all: cb.checked }).eq('id', stationId);
+      if (error) { alert('❌ ' + error.message); return; }
+      container.querySelector(`.edit-technicians-wrap[data-station-id="${stationId}"]`).style.display = cb.checked ? 'none' : 'block';
+      loadStationsList();
+    });
+  });
+
+  container.querySelectorAll('.edit-supervisor-cb').forEach(cb => {
+    cb.addEventListener('click', (e) => e.stopPropagation());
+    cb.addEventListener('change', async () => {
+      const stationId = cb.dataset.stationId;
+      const supervisorId = cb.dataset.supervisorId;
+      if (cb.checked) {
+        const { error } = await sbClient.from('station_supervisors').insert([{ stage_id: stationId, supervisor_id: supervisorId }]);
+        if (error) { alert('❌ ' + error.message); cb.checked = false; return; }
+      } else {
+        const { error } = await sbClient.from('station_supervisors').delete().eq('stage_id', stationId).eq('supervisor_id', supervisorId);
+        if (error) { alert('❌ ' + error.message); cb.checked = true; return; }
+      }
+      loadStationsList();
+    });
+  });
+
+  container.querySelectorAll('.edit-technician-cb').forEach(cb => {
+    cb.addEventListener('click', (e) => e.stopPropagation());
+    cb.addEventListener('change', async () => {
+      const stationId = cb.dataset.stationId;
+      const technicianId = cb.dataset.technicianId;
+      if (cb.checked) {
+        const { error } = await sbClient.from('station_technicians').insert([{ stage_id: stationId, technician_id: technicianId }]);
+        if (error) { alert('❌ ' + error.message); cb.checked = false; return; }
+      } else {
+        const { error } = await sbClient.from('station_technicians').delete().eq('stage_id', stationId).eq('technician_id', technicianId);
+        if (error) { alert('❌ ' + error.message); cb.checked = true; return; }
+      }
+      loadStationsList();
     });
   });
 
