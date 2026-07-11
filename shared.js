@@ -442,6 +442,114 @@ function getRememberedEmail() {
 }
 
 // =========================================================
+// نظام الإشعارات (جرس + صوت تنبيه + قائمة منسدلة)
+// =========================================================
+function playNotificationSound() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const oscillator = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+    oscillator.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    oscillator.type = 'sine';
+    oscillator.frequency.value = 880;
+    gainNode.gain.setValueAtTime(0.001, ctx.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.3, ctx.currentTime + 0.02);
+    gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+    oscillator.start();
+    oscillator.stop(ctx.currentTime + 0.3);
+  } catch (e) {
+    // بعض المتصفحات بتمنع الصوت التلقائي قبل أول تفاعل من المستخدم - تجاهل بهدوء
+  }
+}
+
+function renderNotificationBell(containerId, userId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  const NOTIFIED_KEY = 'notified_sound_ids';
+  let notifiedIds = new Set();
+  try { notifiedIds = new Set(JSON.parse(localStorage.getItem(NOTIFIED_KEY) || '[]')); } catch (e) {}
+
+  async function fetchAndRender() {
+    const { data, error } = await sbClient
+      .from('notifications')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    if (error || !data) return;
+    const unread = data.filter(n => !n.is_read);
+
+    // صوت تنبيه للإشعارات الجديدة اللي لسه ما نبهناش عليها قبل كده
+    const newOnes = unread.filter(n => !notifiedIds.has(n.id));
+    if (newOnes.length > 0) {
+      playNotificationSound();
+      newOnes.forEach(n => notifiedIds.add(n.id));
+      localStorage.setItem(NOTIFIED_KEY, JSON.stringify([...notifiedIds]));
+    }
+
+    const wasOpen = document.getElementById('notifDropdown')?.style.display === 'block';
+
+    container.innerHTML = `
+      <div style="position:relative; display:inline-block;">
+        <button id="notifBellBtn" style="background:#334155; border:none; color:#f1f5f9; padding:8px 12px; border-radius:8px; cursor:pointer; font-size:16px; position:relative;">
+          🔔
+          ${unread.length > 0 ? `<span style="position:absolute; top:-4px; left:-4px; background:#ef4444; color:white; font-size:10px; font-weight:bold; border-radius:50%; width:18px; height:18px; display:flex; align-items:center; justify-content:center;">${unread.length}</span>` : ''}
+        </button>
+        <div id="notifDropdown" style="display:${wasOpen ? 'block' : 'none'}; position:absolute; top:110%; left:0; background:#1e293b; border:1px solid #334155; border-radius:10px; padding:10px; width:300px; max-height:400px; overflow-y:auto; z-index:1000; box-shadow:0 8px 24px rgba(0,0,0,0.5);">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <span style="color:#60a5fa; font-weight:bold; font-size:13px;">🔔 الإشعارات</span>
+            ${unread.length > 0 ? `<button id="markAllReadBtn" style="background:none; border:none; color:#93c5fd; font-size:11px; cursor:pointer;">تحديد الكل كمقروء</button>` : ''}
+          </div>
+          ${data.length === 0 ? '<div style="color:#64748b; font-size:12px; padding:10px; text-align:center;">لا توجد إشعارات</div>' : data.map(n => `
+            <div class="notif-item-row" data-id="${n.id}" style="background:${n.is_read ? '#0f172a' : '#334155'}; border-radius:8px; padding:10px; margin-bottom:6px; cursor:pointer; ${!n.is_read ? 'border-right:3px solid #3b82f6;' : ''}">
+              <div style="font-weight:bold; font-size:12px; color:#f1f5f9;">${n.title}</div>
+              <div style="font-size:11px; color:#94a3b8; margin-top:2px;">${n.message}</div>
+              <div style="font-size:10px; color:#64748b; margin-top:4px;">${formatDate(n.created_at)}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+
+    document.getElementById('notifBellBtn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      const dropdown = document.getElementById('notifDropdown');
+      dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
+    });
+
+    container.querySelectorAll('.notif-item-row').forEach(row => {
+      row.addEventListener('click', async () => {
+        await sbClient.from('notifications').update({ is_read: true }).eq('id', row.dataset.id);
+        fetchAndRender();
+      });
+    });
+
+    const markAllBtn = document.getElementById('markAllReadBtn');
+    if (markAllBtn) {
+      markAllBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await sbClient.from('notifications').update({ is_read: true }).eq('user_id', userId).eq('is_read', false);
+        fetchAndRender();
+      });
+    }
+  }
+
+  // إغلاق القائمة لو ضغطنا برة منها
+  document.addEventListener('click', (e) => {
+    const dropdown = document.getElementById('notifDropdown');
+    if (dropdown && !container.contains(e.target)) {
+      dropdown.style.display = 'none';
+    }
+  });
+
+  fetchAndRender();
+  setInterval(fetchAndRender, 30000); // فحص كل 30 ثانية لإشعارات جديدة
+}
+
+// =========================================================
 // لوحة تشخيص بسيطة تظهر في الصفحة نفسها (مفيدة على الموبايل حيث
 // أدوات المطور صعبة الوصول)
 // =========================================================
