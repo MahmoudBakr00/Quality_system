@@ -317,6 +317,24 @@ async function init() {
   loadStagesFilter();
   loadDefects();
   openDefectFromUrlIfPresent();
+  subscribeToLiveDefectUpdates();
+}
+
+// اشتراك لحظي: أي عيب جديد يتسجل أو أي تحديث (اعتماد/رفض) يحصل، الجدول يتحدّث فورًا من غير Refresh يدوي
+let liveUpdateDebounceTimer = null;
+function subscribeToLiveDefectUpdates() {
+  try {
+    sbClient
+      .channel('defects-live-updates')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'defects' }, () => {
+        // ديباونس بسيط عشان لو جالنا كذا تحديث مرة واحدة منعملش كذا طلب في نفس اللحظة
+        clearTimeout(liveUpdateDebounceTimer);
+        liveUpdateDebounceTimer = setTimeout(() => { loadDefects(); }, 800);
+      })
+      .subscribe();
+  } catch (e) {
+    console.warn('فشل الاشتراك اللحظي لتحديثات العيوب:', e);
+  }
 }
 
 // بيحمّل المحطات اللي المشرف الحالي يقدر يعتمد/يرفض عليها (مفتوحة للكل أو مخصصة له)
