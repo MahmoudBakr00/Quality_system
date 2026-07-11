@@ -129,33 +129,46 @@ const ROLE_NAMES = new Proxy({}, { get: (_, role) => getRoleName(role) });
 // التحقق من الجلسة + جلب البروفايل، مع إمكانية تقييد الصفحة بأدوار معينة
 // allowedRoles: مصفوفة أدوار مسموحة، أو null للسماح للجميع
 // =========================================================
+const CACHED_ROLE_KEY = 'cached_user_role';
+
 async function requireAuth(allowedRoles = null) {
-  const { data: { user } } = await sbClient.auth.getUser();
-  if (!user) {
+  // getSession() بيقرا من التخزين المحلي مباشرة (من غير طلب شبكة) - أسرع وأضمن
+  const { data: { session } } = await sbClient.auth.getSession();
+  if (!session || !session.user) {
     window.location.href = 'index.html';
     return null;
   }
+  const user = session.user;
 
-  const { data: profile, error } = await sbClient
-    .from('profiles')
-    .select('role')
-    .eq('id', user.id)
-    .single();
+  let role = null;
+  try {
+    const { data: profile, error } = await sbClient
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .single();
 
-  if (error || !profile) {
-    console.error('Profile error:', error);
-    await sbClient.auth.signOut();
-    window.location.href = 'index.html';
-    return null;
+    if (error) throw error;
+    role = profile.role;
+    localStorage.setItem(CACHED_ROLE_KEY, role); // نخزن آخر دور معروف عشان نستخدمه لو الشبكة فشلت المرة الجاية
+  } catch (err) {
+    // فشل جلب الدور (غالبًا انقطاع/بطء مؤقت في النت) - نستخدم آخر دور محفوظ بدل ما نعمل تسجيل خروج قسري
+    console.warn('تعذر جلب بيانات المستخدم، سيتم استخدام آخر دور محفوظ محليًا:', err);
+    role = localStorage.getItem(CACHED_ROLE_KEY);
+    if (!role) {
+      // معندناش أي دور محفوظ خالص (أول مرة يفتح فيها الصفحة دي) - هنا فعلاً لازم نرجعه لتسجيل الدخول
+      window.location.href = 'index.html';
+      return null;
+    }
   }
 
-  if (allowedRoles && !allowedRoles.includes(profile.role)) {
+  if (allowedRoles && !allowedRoles.includes(role)) {
     alert('⛔ ليس لديك صلاحية الوصول لهذه الصفحة');
     window.location.href = 'home.html';
     return null;
   }
 
-  return { user, role: profile.role };
+  return { user, role };
 }
 
 async function logout() {
@@ -382,6 +395,32 @@ async function syncAllDataForOffline() {
 function getCachedAllDefects() {
   try { return JSON.parse(localStorage.getItem(CACHE_ALL_DEFECTS_KEY) || '[]'); }
   catch (e) { return []; }
+}
+
+// نسخة خفيفة: تحدّث المحطات وأنواع العيوب بس (من غير سجل العيوب الكامل)
+// مفيدة للصفحات اللي محتاجة بس فورم التسجيل، عشان متبطأش الصفحة
+async function syncFormDataForOffline() {
+  try {
+    const [stagesRes, defectTypesRes] = await Promise.all([
+      sbClient.from('stages').select('*').order('name'),
+      sbClient.from('defect_types').select('*'),
+    ]);
+
+    if (!stagesRes.error) cacheStages(stagesRes.data);
+
+    if (!defectTypesRes.error) {
+      const grouped = {};
+      (defectTypesRes.data || []).forEach((dt) => {
+        if (!grouped[dt.stage_id]) grouped[dt.stage_id] = [];
+        grouped[dt.stage_id].push(dt);
+      });
+      localStorage.setItem(CACHE_DEFECT_TYPES_KEY, JSON.stringify(grouped));
+    }
+    return true;
+  } catch (e) {
+    console.warn('فشلت مزامنة بيانات الفورم (غالبًا مفيش نت حاليًا):', e);
+    return false;
+  }
 }
 
 function getLastSyncTime() {
