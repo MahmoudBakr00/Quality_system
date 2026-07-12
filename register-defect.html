@@ -76,10 +76,12 @@ textarea { resize: vertical; min-height: 80px; }
 </div>
 <div class="job-order-preview" id="jobOrderPreview"></div>
 
+<div id="stageFieldWrap">
 <label data-i18n="stage_label">محطة الفحص</label>
 <select id="stageSelect" required>
   <option value="">⏳ جاري تحميل المحطات...</option>
 </select>
+</div>
 
 <label data-i18n="defect_type_label">نوع العيب</label>
 <select id="defectTypeSelect">
@@ -117,6 +119,7 @@ let currentUser = null;
 let currentRole = null;
 let currentScanner = null;
 let compressedPhotoBlob = null;
+let singleAllowedStageId = null; // لو الحساب متخصص بمحطة واحدة بس، بنحفظ الـ id هنا
 
 // ضغط الصورة تلقائيًا باستخدام Canvas (أقصى بعد 1280px، جودة JPEG 70%)
 function compressImage(file, maxDimension = 1280, quality = 0.7) {
@@ -180,6 +183,10 @@ async function init() {
   renderNotificationBell('notifBellWrap', auth.user.id);
   syncFormDataForOffline(); // نسخة خفيفة (محطات + أنواع عيوب بس) عشان الصفحة متبطأش
   loadStages();
+
+  // نحط المؤشر في خانة السيريال مباشرة عشان يقدر يسكن بالباركود ريدر
+  // أو يكتب فورًا من غير ما يحتاج يدوس على الخانة يدوي
+  document.getElementById('serialInput').focus();
 }
 init();
 
@@ -190,15 +197,25 @@ async function loadStages() {
     if (error) throw error;
 
     let allowedStages = data;
-    // لو مش أدمن، فلتر المحطات على أساس صلاحية الفني
-    if (currentRole !== 'admin') {
+
+    if (currentRole === 'technician') {
+      // الفني: يشوف بس المحطات المفتوحة للكل أو المخصصة له بالاسم
       const { data: assignments } = await sbClient
         .from('station_technicians')
         .select('stage_id')
         .eq('technician_id', currentUser.id);
       const assignedIds = new Set((assignments || []).map(a => a.stage_id));
       allowedStages = data.filter(s => s.technicians_open_to_all || assignedIds.has(s.id));
+    } else if (currentRole === 'supervisor') {
+      // المشرف: يشوف بس المحطات اللي هو مسؤول عنها (نفس منطق صلاحية الاعتماد بالظبط)
+      const { data: assignments } = await sbClient
+        .from('station_supervisors')
+        .select('stage_id')
+        .eq('supervisor_id', currentUser.id);
+      const assignedIds = new Set((assignments || []).map(a => a.stage_id));
+      allowedStages = data.filter(s => s.visible_to_all || assignedIds.has(s.id));
     }
+    // الأدمن يشوف كل المحطات من غير أي تقييد
 
     cacheStages(allowedStages);
     renderStagesOptions(allowedStages);
@@ -214,10 +231,14 @@ async function loadStages() {
 
 function renderStagesOptions(data) {
   const select = document.getElementById('stageSelect');
+  const wrap = document.getElementById('stageFieldWrap');
+
   if (!data || data.length === 0) {
+    wrap.style.display = 'block';
     select.innerHTML = '<option value="">📭 لا توجد محطات مضافة بعد</option>';
     return;
   }
+
   select.innerHTML = '<option value="">-- اختر محطة الفحص --</option>';
   data.forEach(s => {
     const o = document.createElement('option');
@@ -225,6 +246,18 @@ function renderStagesOptions(data) {
     o.textContent = s.name + (s.line_no ? ' (خط ' + s.line_no + ')' : '');
     select.appendChild(o);
   });
+
+  // لو الحساب متخصص بمحطة واحدة بس، نختارها تلقائيًا ونخفي خانة الاختيار
+  // عشان الفني يروح مباشرة لاختيار نوع العيب من غير خطوة زيادة
+  if (data.length === 1) {
+    singleAllowedStageId = data[0].id;
+    select.value = data[0].id;
+    wrap.style.display = 'none';
+    select.dispatchEvent(new Event('change'));
+  } else {
+    singleAllowedStageId = null;
+    wrap.style.display = 'block';
+  }
 }
 
 document.getElementById('stageSelect').addEventListener('change', async (e) => {
@@ -327,7 +360,7 @@ document.getElementById('defectForm').addEventListener('submit', async (e) => {
 
       const { count } = await dupQuery;
       if (count && count > 0) {
-        alert(`⚠️ تنبيه: العيب ده اتسجل قبل كده ${count} مرة بنفس السيريال والمحطة ونوع العيب. هيتم تسجيله برضه عادي.`);
+        alert(`⚠️ تنبيه: تم تسجيل هذا العيب مسبقًا ${count} مرة بنفس السيريال والمحطة ونوع العيب. سيتم تسجيله مجددًا بشكل طبيعي.`);
       }
     } catch (err) {
       console.warn('فشل فحص التكرار (تجاهل واستمر):', err);
@@ -366,16 +399,16 @@ document.getElementById('defectForm').addEventListener('submit', async (e) => {
       ? `✅ تم تسجيل العيب بنجاح! كود العيب: ${insertedData.defect_code}`
       : '✅ تم تسجيل العيب بنجاح!';
     successMsg.style.display = 'block';
-    document.getElementById('defectForm').reset(); compressedPhotoBlob = null; document.getElementById('photoPreviewWrap').style.display = 'none';
+    document.getElementById('defectForm').reset(); compressedPhotoBlob = null; document.getElementById('photoPreviewWrap').style.display = 'none'; if (singleAllowedStageId) { document.getElementById('stageSelect').value = singleAllowedStageId; document.getElementById('stageSelect').dispatchEvent(new Event('change')); } document.getElementById('serialInput').focus();
     document.getElementById('jobOrderPreview').style.display = 'none';
     document.getElementById('defectTypeSelect').innerHTML = '<option value="">-- اختر نوع العيب (اختياري) --</option>';
     setTimeout(() => { successMsg.style.display = 'none'; }, 4000);
   } catch (err) {
     // فشل الإرسال (غالبًا لانقطاع النت) - احفظ العيب محليًا للمزامنة لاحقًا
     queueDefectOffline(defectPayload);
-    successMsg.textContent = '📴 مفيش اتصال بالنت دلوقتي — تم حفظ العيب محليًا وهيترفع تلقائيًا لما النت يرجع.';
+    successMsg.textContent = '📴 لا يوجد اتصال بالإنترنت حاليًا. تم حفظ العيب محليًا وسيتم رفعه تلقائيًا عند عودة الاتصال.';
     successMsg.style.display = 'block';
-    document.getElementById('defectForm').reset(); compressedPhotoBlob = null; document.getElementById('photoPreviewWrap').style.display = 'none';
+    document.getElementById('defectForm').reset(); compressedPhotoBlob = null; document.getElementById('photoPreviewWrap').style.display = 'none'; if (singleAllowedStageId) { document.getElementById('stageSelect').value = singleAllowedStageId; document.getElementById('stageSelect').dispatchEvent(new Event('change')); } document.getElementById('serialInput').focus();
     document.getElementById('jobOrderPreview').style.display = 'none';
     document.getElementById('defectTypeSelect').innerHTML = '<option value="">-- اختر نوع العيب (اختياري) --</option>';
     renderPendingBadge('pendingBadgeWrap');
