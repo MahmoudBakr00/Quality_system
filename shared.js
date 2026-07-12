@@ -12,7 +12,7 @@ const TRANSLATIONS = {
   ar: {
     login: 'تسجيل الدخول', register_tab: 'تسجيل حساب جديد', login_tab: 'دخول',
     email_label: 'البريد الإلكتروني', password_label: 'كلمة المرور', role_label: 'الدور',
-    role_technician: 'فني', role_supervisor: 'مشرف', role_admin: 'مدير النظام',
+    role_technician: 'فني', role_supervisor: 'مشرف محطة', role_admin: 'مهندس', role_general_supervisor: 'مشرف عام', role_maintenance: 'فني صيانة',
     login_btn: 'دخول', create_account_btn: 'إنشاء الحساب',
     supervisor_hint: 'تُنشأ حسابات المشرفين فقط من لوحة تحكم مدير النظام.',
     admin_code_label: 'كود تفعيل مدير النظام', forgot_password: 'نسيت كلمة المرور؟',
@@ -41,7 +41,7 @@ const TRANSLATIONS = {
   en: {
     login: 'Login', register_tab: 'Create Account', login_tab: 'Login',
     email_label: 'Email', password_label: 'Password', role_label: 'Role',
-    role_technician: 'Technician', role_supervisor: 'Supervisor', role_admin: 'Admin',
+    role_technician: 'Technician', role_supervisor: 'Station Supervisor', role_admin: 'Engineer', role_general_supervisor: 'General Supervisor', role_maintenance: 'Maintenance Technician',
     login_btn: 'Login', create_account_btn: 'Create Account',
     supervisor_hint: 'Supervisor accounts can only be created from the admin panel.',
     admin_code_label: 'Admin Activation Code', forgot_password: 'Forgot password?',
