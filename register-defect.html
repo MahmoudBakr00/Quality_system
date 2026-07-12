@@ -280,6 +280,8 @@ function renderDefectTypeOptions(data) {
 }
 
 // معاينة الجوب أوردر لحظيًا
+let currentDefectCode = null;
+
 document.getElementById('serialInput').addEventListener('input', (e) => {
   const preview = document.getElementById('jobOrderPreview');
   const jo = extractJobOrder(e.target.value.trim());
@@ -288,6 +290,14 @@ document.getElementById('serialInput').addEventListener('input', (e) => {
     preview.style.display = 'block';
   } else {
     preview.style.display = 'none';
+  }
+
+  // نولّد كود العيب فور ما السيريال يتحدد (سكان أو كتابة يدوية)، مرة واحدة بس لكل تسجيل
+  // عشان يفضل ثابت حتى لو الفني عدّل حاجات تانية في الفورم قبل ما يدوس تسجيل
+  if (e.target.value.trim() && !currentDefectCode) {
+    currentDefectCode = generateDefectCode();
+  } else if (!e.target.value.trim()) {
+    currentDefectCode = null;
   }
 });
 
@@ -339,6 +349,8 @@ document.getElementById('defectForm').addEventListener('submit', async (e) => {
     description,
     technician_id: currentUser.id,
     technician_email: currentUser.email,
+    // كود العيب اتولّد فور سحب السيريال (أو دلوقتي كحل احتياطي لو لأي سبب ما اتولدش)
+    defect_code: currentDefectCode || generateDefectCode(),
   };
 
   // تحقق من وجود عيوب مسجلة قبل كده بنفس التفاصيل (سيريال + محطة + نوع العيب)
@@ -391,7 +403,7 @@ document.getElementById('defectForm').addEventListener('submit', async (e) => {
       ? `✅ تم تسجيل العيب بنجاح! كود العيب: ${insertedData.defect_code}`
       : '✅ تم تسجيل العيب بنجاح!';
     successMsg.style.display = 'block';
-    document.getElementById('defectForm').reset(); compressedPhotoBlob = null; document.getElementById('photoPreviewWrap').style.display = 'none'; if (singleAllowedStageId) { document.getElementById('stageSelect').value = singleAllowedStageId; document.getElementById('stageSelect').dispatchEvent(new Event('change')); } document.getElementById('serialInput').focus();
+    document.getElementById('defectForm').reset(); compressedPhotoBlob = null; currentDefectCode = null; document.getElementById('photoPreviewWrap').style.display = 'none'; if (singleAllowedStageId) { document.getElementById('stageSelect').value = singleAllowedStageId; document.getElementById('stageSelect').dispatchEvent(new Event('change')); } document.getElementById('serialInput').focus();
     document.getElementById('jobOrderPreview').style.display = 'none';
     document.getElementById('defectTypeSelect').innerHTML = '<option value="">-- اختر نوع العيب (اختياري) --</option>';
     setTimeout(() => { successMsg.style.display = 'none'; }, 4000);
@@ -400,7 +412,7 @@ document.getElementById('defectForm').addEventListener('submit', async (e) => {
     queueDefectOffline(defectPayload);
     successMsg.textContent = '📴 لا يوجد اتصال بالإنترنت حاليًا. تم حفظ العيب محليًا وسيتم رفعه تلقائيًا عند عودة الاتصال.';
     successMsg.style.display = 'block';
-    document.getElementById('defectForm').reset(); compressedPhotoBlob = null; document.getElementById('photoPreviewWrap').style.display = 'none'; if (singleAllowedStageId) { document.getElementById('stageSelect').value = singleAllowedStageId; document.getElementById('stageSelect').dispatchEvent(new Event('change')); } document.getElementById('serialInput').focus();
+    document.getElementById('defectForm').reset(); compressedPhotoBlob = null; currentDefectCode = null; document.getElementById('photoPreviewWrap').style.display = 'none'; if (singleAllowedStageId) { document.getElementById('stageSelect').value = singleAllowedStageId; document.getElementById('stageSelect').dispatchEvent(new Event('change')); } document.getElementById('serialInput').focus();
     document.getElementById('jobOrderPreview').style.display = 'none';
     document.getElementById('defectTypeSelect').innerHTML = '<option value="">-- اختر نوع العيب (اختياري) --</option>';
     renderPendingBadge('pendingBadgeWrap');
