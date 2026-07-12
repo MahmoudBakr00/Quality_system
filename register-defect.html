@@ -199,23 +199,15 @@ async function loadStages() {
     let allowedStages = data;
 
     if (currentRole === 'technician') {
-      // الفني: يشوف بس المحطات المفتوحة للكل أو المخصصة له بالاسم
+      // الفني بس هو المقيّد: يشوف المحطات المفتوحة للكل أو المخصصة له بالاسم
       const { data: assignments } = await sbClient
         .from('station_technicians')
         .select('stage_id')
         .eq('technician_id', currentUser.id);
       const assignedIds = new Set((assignments || []).map(a => a.stage_id));
       allowedStages = data.filter(s => s.technicians_open_to_all || assignedIds.has(s.id));
-    } else if (currentRole === 'supervisor') {
-      // المشرف: يشوف بس المحطات اللي هو مسؤول عنها (نفس منطق صلاحية الاعتماد بالظبط)
-      const { data: assignments } = await sbClient
-        .from('station_supervisors')
-        .select('stage_id')
-        .eq('supervisor_id', currentUser.id);
-      const assignedIds = new Set((assignments || []).map(a => a.stage_id));
-      allowedStages = data.filter(s => s.visible_to_all || assignedIds.has(s.id));
     }
-    // الأدمن يشوف كل المحطات من غير أي تقييد
+    // الأدمن والمشرف العام ومشرف المحطة كلهم يقدروا يسجلوا عيوب لأي محطة من غير تقييد
 
     cacheStages(allowedStages);
     renderStagesOptions(allowedStages);
