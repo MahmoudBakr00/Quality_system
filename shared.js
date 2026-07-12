@@ -359,23 +359,26 @@ async function syncPendingDefects() {
 
     for (const item of queue) {
       try {
+        console.log('🔄 محاولة مزامنة عيب:', item.localId, item.data);
         const { error } = await sbClient.from('defects').insert([item.data]);
         if (error) {
+          console.error('❌ فشلت مزامنة العيب:', item.localId, 'الخطأ الكامل:', error);
           // لو الخطأ بسبب تكرار (client_ref_id أو defect_code)، معناه العيب ده
           // اتسجل بنجاح فعلاً من قبل (غالبًا من تاب تاني كان بيزامن في نفس اللحظة)
           // نعتبرها نجحت، وقاعدة البيانات نفسها منعت أي صف مكرر يتكون من الأساس
-          const isDuplicate = error.code === '23505'
-            || (error.message || '').includes('client_ref_id')
-            || (error.message || '').includes('defect_code');
+          const isDuplicate = error.code === '23505';
           if (isDuplicate) {
+            console.warn('⚠️ اتعامل معاها كتكرار حقيقي (كود 23505) - العيب ده كان موجود بالفعل');
             synced++;
           } else {
             throw error;
           }
         } else {
+          console.log('✅ نجحت مزامنة العيب:', item.localId);
           synced++;
         }
       } catch (e) {
+        console.error('🚨 العيب هيرجع للطابور يتحاول تاني:', item.localId, e);
         remaining.push(item); // نسيبه في الطابور نحاول تاني بعدين
       }
     }
@@ -494,6 +497,95 @@ const REMEMBERED_EMAIL_KEY = 'remembered_email';
 
 function saveRememberedEmail(email) {
   localStorage.setItem(REMEMBERED_EMAIL_KEY, email);
+}
+
+// =========================================================
+// يحوّل أي <select> عادي لقائمة قابلة للبحث (بحث "يحتوي على" في
+// أي مكان من النص، مش بس "يبدأ بـ" زي سلوك المتصفح الافتراضي)
+// بيشتغل فوق نفس الـ <select> الأصلي من غير ما يغيّر أي كود تاني
+// بيستخدمه أو بيسمعه (change event لسه شغال زي ما هو)
+// =========================================================
+function makeSelectSearchable(selectId) {
+  const select = document.getElementById(selectId);
+  if (!select || select.dataset.searchable) return;
+  select.dataset.searchable = 'true';
+
+  const wrapper = document.createElement('div');
+  wrapper.style.position = 'relative';
+  select.parentNode.insertBefore(wrapper, select);
+  wrapper.appendChild(select);
+  select.style.position = 'absolute';
+  select.style.opacity = '0';
+  select.style.height = '0';
+  select.style.pointerEvents = 'none';
+
+  const searchInput = document.createElement('input');
+  searchInput.type = 'text';
+  searchInput.autocomplete = 'off';
+  searchInput.readOnly = false;
+  searchInput.style.cssText = (select.getAttribute('style') || '') + '; cursor:pointer; padding-left:32px;';
+  searchInput.className = select.className;
+  searchInput.placeholder = 'اضغط للاختيار أو اكتب للبحث...';
+  wrapper.appendChild(searchInput);
+
+  const arrow = document.createElement('div');
+  arrow.textContent = '▼';
+  arrow.style.cssText = 'position:absolute; left:12px; top:50%; transform:translateY(-50%); color:#94a3b8; font-size:11px; pointer-events:none;';
+  wrapper.appendChild(arrow);
+
+  const dropdown = document.createElement('div');
+  dropdown.style.cssText = 'display:none; position:absolute; top:100%; right:0; left:0; background:#1e293b; border:1px solid #334155; border-radius:8px; max-height:220px; overflow-y:auto; z-index:200; margin-top:4px; box-shadow:0 8px 24px rgba(0,0,0,0.5);';
+  wrapper.appendChild(dropdown);
+
+  function getOptions() {
+    return Array.from(select.options);
+  }
+
+  function syncDisplay() {
+    const selected = select.options[select.selectedIndex];
+    searchInput.value = selected ? selected.textContent : '';
+  }
+
+  function renderDropdown(filterText) {
+    const q = (filterText || '').trim().toLowerCase();
+    const items = getOptions().filter(o => !q || o.textContent.toLowerCase().includes(q));
+    if (items.length === 0) {
+      dropdown.innerHTML = '<div style="padding:10px 12px; color:#64748b; font-size:12px;">لا توجد نتائج</div>';
+      return;
+    }
+    dropdown.innerHTML = items.map(o => `<div class="searchable-option" data-value="${o.value.replace(/"/g, '&quot;')}" style="padding:9px 12px; cursor:pointer; font-size:13px; color:#f1f5f9;">${o.textContent}</div>`).join('');
+    dropdown.querySelectorAll('.searchable-option').forEach(el => {
+      el.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        select.value = el.dataset.value;
+        select.dispatchEvent(new Event('change'));
+        syncDisplay();
+        dropdown.style.display = 'none';
+      });
+      el.addEventListener('mouseenter', () => { el.style.background = '#334155'; });
+      el.addEventListener('mouseleave', () => { el.style.background = 'transparent'; });
+    });
+  }
+
+  searchInput.addEventListener('focus', () => {
+    renderDropdown('');
+    dropdown.style.display = 'block';
+    searchInput.select();
+  });
+  searchInput.addEventListener('input', () => {
+    renderDropdown(searchInput.value);
+    dropdown.style.display = 'block';
+  });
+  searchInput.addEventListener('blur', () => {
+    setTimeout(() => { dropdown.style.display = 'none'; syncDisplay(); }, 150);
+  });
+
+  // لو الـ select اتغير برمجيًا من كود تاني (زي التحميل التلقائي للمحطة الوحيدة)
+  select.addEventListener('change', syncDisplay);
+  const observer = new MutationObserver(syncDisplay);
+  observer.observe(select, { childList: true });
+
+  syncDisplay();
 }
 
 function getRememberedEmail() {
