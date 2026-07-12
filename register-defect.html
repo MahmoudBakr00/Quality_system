@@ -183,6 +183,8 @@ async function init() {
   renderNotificationBell('notifBellWrap', auth.user.id);
   syncFormDataForOffline(); // نسخة خفيفة (محطات + أنواع عيوب بس) عشان الصفحة متبطأش
   loadStages();
+  makeSelectSearchable('stageSelect');
+  makeSelectSearchable('defectTypeSelect');
 
   // نحط المؤشر في خانة السيريال مباشرة عشان يقدر يسكن بالباركود ريدر
   // أو يكتب فورًا من غير ما يحتاج يدوس على الخانة يدوي
@@ -258,13 +260,29 @@ document.getElementById('stageSelect').addEventListener('change', async (e) => {
   dtSelect.innerHTML = '<option value="">-- اختر نوع العيب (اختياري) --</option>';
   if (!stageId) return;
 
+  // نتأكد من حالة الاتصال الأول قبل أي محاولة - بدل ما ننتظر الطلب يفشل
+  // (بعض المتصفحات بتتأخر في اكتشاف انقطاع النت من الطلب نفسه)
+  if (!navigator.onLine) {
+    console.log('📴 مفيش نت - هنستخدم أنواع العيوب المحفوظة محليًا للمحطة:', stageId);
+    const cached = getCachedDefectTypes(stageId);
+    console.log('📦 عدد أنواع العيوب المحفوظة لهذه المحطة:', cached.length);
+    renderDefectTypeOptions(cached);
+    if (cached.length === 0) {
+      dtSelect.innerHTML += '<option value="" disabled>⚠️ لا توجد أنواع عيوب محفوظة محليًا لهذه المحطة</option>';
+    }
+    return;
+  }
+
   try {
     const { data, error } = await sbClient.from('defect_types').select('*').eq('stage_id', stageId).order('name');
     if (error) throw error;
+    console.log('✅ تم تحميل أنواع العيوب من النت:', data.length);
     cacheDefectTypes(stageId, data);
     renderDefectTypeOptions(data);
   } catch (err) {
-    renderDefectTypeOptions(getCachedDefectTypes(stageId));
+    console.warn('⚠️ فشل تحميل أنواع العيوب من النت رغم إن navigator.onLine=true، هنستخدم النسخة المحفوظة:', err);
+    const cached = getCachedDefectTypes(stageId);
+    renderDefectTypeOptions(cached);
   }
 });
 
