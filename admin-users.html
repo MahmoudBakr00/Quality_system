@@ -9,7 +9,7 @@
 <link rel="apple-touch-icon" href="icon-180.png" />
 <meta name="theme-color" content="#3b82f6" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>إدارة المستخدمين - الأدمن</title>
+<title>إدارة المستخدمين - مدير النظام</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
@@ -57,15 +57,15 @@ body { background: #0f172a; padding: 20px; color: #f1f5f9; }
 <div class="header">
 <h1 data-i18n="manage_users">👥 إدارة المستخدمين</h1>
 <div class="nav-links">
-<a href="dashboard.html" data-i18n="dashboard">📊 الداشبورد</a>
+<a href="dashboard.html" data-i18n="dashboard">📊 لوحة التحكم</a>
 <a href="home.html" data-i18n="home">🏠 الرئيسية</a>
 <div id="langToggleWrap"></div>
 <button class="logout-btn" id="logoutBtn" data-i18n="logout">تسجيل خروج</button>
 </div>
 </div>
 
-<div class="panel">
-<h2 data-i18n="add_new_user">➕ إضافة مستخدم جديد (مشرف / أدمن / فني)</h2>
+<div class="panel" id="addUserPanel">
+<h2 data-i18n="add_new_user">➕ إضافة مستخدم جديد</h2>
 <div class="user-form">
   <div class="row">
     <div class="field">
@@ -75,9 +75,11 @@ body { background: #0f172a; padding: 20px; color: #f1f5f9; }
     <div class="field">
       <label data-i18n="role_label">👤 الدور</label>
       <select id="newUserRole">
-        <option value="supervisor" data-i18n="role_supervisor">مشرف</option>
+        <option value="supervisor" data-i18n="role_supervisor">مشرف محطة</option>
+        <option value="general_supervisor">مشرف عام</option>
         <option value="technician" data-i18n="role_technician">فني</option>
-        <option value="admin" data-i18n="role_admin">أدمن</option>
+        <option value="maintenance">فني صيانة</option>
+        <option value="admin" data-i18n="role_admin">مدير نظام (مهندس)</option>
       </select>
     </div>
     <div class="actions">
@@ -101,13 +103,18 @@ body { background: #0f172a; padding: 20px; color: #f1f5f9; }
 <script src="shared.js"></script>
 <script>
 let currentUser = null;
+let currentRole = null;
 
 async function init() {
   applyTranslations();
   renderLangToggle('langToggleWrap');
-  const auth = await requireAuth(['admin']);
+  const auth = await requireAuth(['admin', 'general_supervisor']);
   if (!auth) return;
   currentUser = auth.user;
+  currentRole = auth.role;
+  if (currentRole !== 'admin') {
+    document.getElementById('addUserPanel').style.display = 'none';
+  }
   loadUsers();
 }
 init();
@@ -130,12 +137,14 @@ async function loadUsers() {
         <div class="name">${u.email || 'بدون بريد'} ${isCurrent ? '⭐' : ''}</div>
       </div>
       <div class="role-edit">
-        <select class="role-select" data-user-id="${u.id}">
+        <select class="role-select" data-user-id="${u.id}" ${currentRole !== 'admin' ? 'disabled' : ''}>
           <option value="technician" ${u.role === 'technician' ? 'selected' : ''}>${t('role_technician')}</option>
-          <option value="supervisor" ${u.role === 'supervisor' ? 'selected' : ''}>${t('role_supervisor')}</option>
-          <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>${t('role_admin')}</option>
+          <option value="maintenance" ${u.role === 'maintenance' ? 'selected' : ''}>فني صيانة</option>
+          <option value="supervisor" ${u.role === 'supervisor' ? 'selected' : ''}>مشرف محطة</option>
+          <option value="general_supervisor" ${u.role === 'general_supervisor' ? 'selected' : ''}>مشرف عام</option>
+          <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>${t('role_admin')} (مهندس)</option>
         </select>
-        <button class="save-role-btn" data-user-id="${u.id}">💾 حفظ</button>
+        ${currentRole === 'admin' ? `<button class="save-role-btn" data-user-id="${u.id}">💾 حفظ</button>` : '<span style="color:#64748b; font-size:11px;">🔒 الأدمن بس يقدر يعدّل</span>'}
       </div>
     `;
     container.appendChild(div);
@@ -148,7 +157,7 @@ async function loadUsers() {
       const newRole = select.value;
 
       if (userId === currentUser.id && newRole !== 'admin') {
-        if (!confirm('⚠️ أنت بصدد تغيير دورك أنت شخصيًا وقد تفقد صلاحيات الأدمن فورًا. متابعة؟')) return;
+        if (!confirm('⚠️ أنت بصدد تغيير دورك أنت شخصيًا وقد تفقد صلاحيات مدير النظام فورًا. متابعة؟')) return;
       }
 
       btn.disabled = true;
