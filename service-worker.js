@@ -7,7 +7,7 @@
 // - طلبات Supabase (بيانات حية): بتتجاهل تمامًا، بتروح للنت مباشرة.
 // =========================================================
 
-const CACHE_NAME = 'defect-system-cache-v6';
+const CACHE_NAME = 'defect-system-cache-v7';
 
 const PRECACHE_URLS = [
   './',
@@ -20,6 +20,7 @@ const PRECACHE_URLS = [
   'change-password.html',
   'reset-password.html',
   'inspection-check.html',
+  'repair.html',
   'shared.js',
   'manifest.json',
   'icon-192.png',
