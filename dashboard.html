@@ -46,6 +46,10 @@ tr.row-clickable { cursor: pointer; }
 .status-badge.pending { background: #fbbf24; color: #78350f; }
 .status-badge.approved { background: #22c55e; color: white; }
 .status-badge.rejected { background: #ef4444; color: white; }
+.repair-status-badge { font-size: 11px; padding: 3px 10px; border-radius: 12px; font-weight: bold; white-space: nowrap; }
+.repair-status-badge.pending_review { background: #fbbf24; color: #78350f; }
+.repair-status-badge.confirmed { background: #22c55e; color: white; }
+.repair-status-badge.rejected { background: #ef4444; color: white; }
 .action-btn { border: none; padding: 5px 10px; border-radius: 6px; cursor: pointer; font-size: 11px; font-weight: bold; margin: 2px; }
 .approve-btn { background: #22c55e; color: white; }
 .approve-btn:hover { background: #16a34a; }
@@ -201,9 +205,9 @@ tr.row-clickable { cursor: pointer; }
 <table>
 <thead><tr>
   <th id="checkboxHeaderCell" style="display:none;"><input type="checkbox" id="selectAllCheckbox" /></th>
-  <th data-i18n="col_serial">السيريال</th><th>كود العيب</th><th data-i18n="col_job_order">الجوب أوردر</th><th data-i18n="col_station">المحطة</th><th>خط الإنتاج</th><th data-i18n="col_defect_type">نوع العيب</th><th>وصف العيب</th><th>الصورة</th><th data-i18n="col_status">الحالة</th><th data-i18n="col_technician">الفني</th><th data-i18n="col_date">التاريخ</th><th>المُراجِع</th><th>تاريخ الإغلاق</th><th>ملاحظة المراجعة</th><th></th>
+  <th data-i18n="col_serial">السيريال</th><th>كود العيب</th><th data-i18n="col_job_order">الجوب أوردر</th><th data-i18n="col_station">المحطة</th><th>خط الإنتاج</th><th data-i18n="col_defect_type">نوع العيب</th><th>وصف العيب</th><th>الصورة</th><th data-i18n="col_status">الحالة</th><th>حالة الإصلاح</th><th data-i18n="col_technician">الفني</th><th data-i18n="col_date">التاريخ</th><th>المُراجِع</th><th>تاريخ الإغلاق</th><th>ملاحظة المراجعة</th><th></th>
 </tr></thead>
-<tbody id="tbody"><tr><td colspan="16" class="loading">⏳ جاري التحميل...</td></tr></tbody>
+<tbody id="tbody"><tr><td colspan="17" class="loading">⏳ جاري التحميل...</td></tr></tbody>
 </table>
 </div>
 </div>
@@ -219,6 +223,13 @@ tr.row-clickable { cursor: pointer; }
 </div>
 <div id="historyEditWrap" style="display:none; margin-top:10px;">
   <button id="historyEditBtn" style="width:100%; padding:10px; background:#8b5cf6; color:white; border:none; border-radius:8px; font-size:13px; font-weight:bold; cursor:pointer;">✏️ تعديل بيانات العيب يدويًا</button>
+</div>
+<div id="repairReviewWrap" style="display:none; margin-top:14px; padding-top:14px; border-top:1px solid #334155;">
+  <div style="color:#fbbf24; font-weight:bold; font-size:13px; margin-bottom:10px;">🔧 يوجد بلاغ إصلاح لهذا العطل بانتظار المراجعة</div>
+  <div style="display:flex; gap:10px;">
+    <button id="repairConfirmBtn" style="flex:1; padding:10px; background:#22c55e; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:13px;">✅ تأكيد الإصلاح</button>
+    <button id="repairRejectBtn" style="flex:1; padding:10px; background:#ef4444; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:13px;">✖ رفض الإصلاح</button>
+  </div>
 </div>
 <button class="modal-close" id="historyClose">إغلاق</button>
 </div>
@@ -410,7 +421,7 @@ document.getElementById('photoLightboxClose').addEventListener('click', () => {
 // ============ تحميل العيوب ============
 async function loadDefects() {
   const tbody = document.getElementById('tbody');
-  tbody.innerHTML = `<tr><td colspan="16" class="loading">⏳ جاري التحميل...</td></tr>`;
+  tbody.innerHTML = `<tr><td colspan="17" class="loading">⏳ جاري التحميل...</td></tr>`;
 
   const stageId = document.getElementById('filterStage').value;
   const status = document.getElementById('filterStatus').value;
@@ -470,6 +481,7 @@ async function loadDefects() {
 }
 
 const statusText = { pending: t('status_pending'), approved: t('status_approved'), rejected: t('status_rejected') };
+const dashboardRepairStatusText = { pending_review: '⏳ بانتظار المراجعة', confirmed: '✅ تم التأكيد', rejected: '✖ مرفوض' };
 
 // ============ سجل التعديلات الكامل لسيريال معين ============
 async function renderSerialHistoryPanel(searchTerm) {
@@ -512,7 +524,7 @@ async function renderSerialHistoryPanel(searchTerm) {
     return;
   }
 
-  const actionText = { created: '📝 تسجيل', approved: '✔ اعتماد', rejected: '✖ رفض', edited: '✏️ تعديل يدوي' };
+  const actionText = { created: '📝 تسجيل', approved: '✔ اعتماد', rejected: '✖ رفض', edited: '✏️ تعديل يدوي', repair_reported: '🔧 بلاغ إصلاح', repair_confirmed: '✅ تأكيد إصلاح', repair_rejected: '✖ رفض إصلاح' };
   body.innerHTML = data.map(h => `
     <div class="serial-history-entry">
       <span class="sh-action ${h.action}">${actionText[h.action] || h.action}</span>
@@ -526,7 +538,7 @@ async function renderSerialHistoryPanel(searchTerm) {
 function renderTable() {
   const tbody = document.getElementById('tbody');
   if (allDefects.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="16" class="no-data">📭 لا توجد عيوب مطابقة</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="17" class="no-data">📭 لا توجد عيوب مطابقة</td></tr>`;
     renderParetoChart();
     return;
   }
@@ -553,6 +565,7 @@ function renderTable() {
       <td style="max-width:180px; white-space:normal; font-size:11px;">${d.description || '-'}</td>
       <td onclick="event.stopPropagation()">${d.photo_url ? `<img src="${d.photo_url}" class="thumb-img" data-full="${d.photo_url}" style="width:36px; height:36px; object-fit:cover; border-radius:6px; cursor:pointer;" />` : '-'}</td>
       <td><span class="status-badge ${d.status}">${statusText[d.status]}</span></td>
+      <td>${d.repair_status ? `<span class="repair-status-badge ${d.repair_status}">${dashboardRepairStatusText[d.repair_status]}</span>` : '-'}</td>
       <td>${d.technician_email ? d.technician_email.split('@')[0] : '-'}</td>
       <td style="font-size:11px;">${formatDate(d.created_at)}</td>
       <td>${d.reviewed_by_email ? d.reviewed_by_email.split('@')[0] : '-'}</td>
@@ -861,6 +874,15 @@ async function openHistoryModal(defect) {
   const editWrap = document.getElementById('historyEditWrap');
   editWrap.style.display = (canReview && supervisorCanReviewThis) ? 'block' : 'none';
 
+  // مراجعة بلاغ الإصلاح: متاحة للأدمن دايمًا (حتى لو اتراجعت قبل كده)،
+  // وللمشرف المسؤول بس لو لسه في انتظار المراجعة
+  const repairWrap = document.getElementById('repairReviewWrap');
+  const showRepairReview = supervisorCanReviewThis && (
+    (currentRole === 'admin' && defect.repair_status) ||
+    (currentRole === 'supervisor' && defect.repair_status === 'pending_review')
+  );
+  repairWrap.style.display = showRepairReview ? 'block' : 'none';
+
   const { data, error } = await sbClient
     .from('defect_history')
     .select('*')
@@ -872,7 +894,7 @@ async function openHistoryModal(defect) {
     return;
   }
 
-  const actionText = { created: '📝 تم التسجيل', approved: '✔ تم الاعتماد', rejected: '✖ تم الرفض', edited: '✏️ تم التعديل اليدوي' };
+  const actionText = { created: '📝 تم التسجيل', approved: '✔ تم الاعتماد', rejected: '✖ تم الرفض', edited: '✏️ تم التعديل اليدوي', repair_reported: '🔧 تم الإبلاغ عن إصلاح', repair_confirmed: '✅ تم تأكيد الإصلاح', repair_rejected: '✖ تم رفض الإصلاح' };
   body.innerHTML = data.map(h => `
     <div class="history-item">
       <div class="action ${h.action}">${actionText[h.action] || h.action}</div>
@@ -904,6 +926,36 @@ document.getElementById('historyEditBtn').addEventListener('click', async () => 
   if (!currentModalDefect) return;
   historyModal.classList.remove('open');
   await openEditDefectModal(currentModalDefect);
+});
+
+document.getElementById('repairConfirmBtn').addEventListener('click', async () => {
+  if (!currentModalDefect) return;
+  const { error } = await sbClient.rpc('review_defect_repair', {
+    p_defect_id: currentModalDefect.id,
+    p_decision: 'confirmed',
+    p_note: null,
+  });
+  if (error) { alert('❌ فشل التأكيد: ' + error.message); return; }
+  historyModal.classList.remove('open');
+  alert('✅ تم تأكيد الإصلاح بنجاح');
+  loadDefects();
+});
+
+document.getElementById('repairRejectBtn').addEventListener('click', async () => {
+  if (!currentModalDefect) return;
+  const note = prompt('اكتب سبب رفض الإصلاح:');
+  if (note === null) return; // ضغط إلغاء
+  if (!note.trim()) { alert('⚠️ لازم تكتب سبب الرفض'); return; }
+
+  const { error } = await sbClient.rpc('review_defect_repair', {
+    p_defect_id: currentModalDefect.id,
+    p_decision: 'rejected',
+    p_note: note.trim(),
+  });
+  if (error) { alert('❌ فشل الرفض: ' + error.message); return; }
+  historyModal.classList.remove('open');
+  alert('✅ تم رفض الإصلاح وتسجيل السبب');
+  loadDefects();
 });
 
 async function openEditDefectModal(defect) {
