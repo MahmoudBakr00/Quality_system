@@ -325,6 +325,7 @@ tr.row-clickable { cursor: pointer; }
 <script>
 let currentUser = null;
 let currentRole = null;
+let isFullAccess = false; // أدمن أو مشرف عام
 let allDefects = [];
 let supervisorAllowedStageIds = null; // بس للمشرف: المحطات اللي يقدر يعتمد/يرفض عليها
 let allSupervisors = [];
@@ -337,19 +338,21 @@ async function init() {
   if (!auth) return;
   currentUser = auth.user;
   currentRole = auth.role;
+  isFullAccess = currentRole === 'admin' || currentRole === 'general_supervisor';
   renderNotificationBell('notifBellWrap', auth.user.id);
   renderPushToggleButton('pushToggleWrap', auth.user.id);
 
-  if (currentRole === 'admin') {
+  if (isFullAccess) {
     document.getElementById('stationsBtn').style.display = 'inline-block';
     document.getElementById('usersLink').style.display = 'inline-block';
     document.getElementById('deleteSelectedBtn').style.display = 'inline-block';
   }
-  if (currentRole === 'admin' || currentRole === 'supervisor') {
+  if (isFullAccess || currentRole === 'supervisor') {
     document.getElementById('checkboxHeaderCell').style.display = 'table-cell';
     document.getElementById('bulkApproveBtn').style.display = 'inline-block';
     document.getElementById('bulkRejectBtn').style.display = 'inline-block';
   }
+  // فني الصيانة وفني التسجيل: عرض فقط، من غير أي أزرار تفاعل
 
   if (currentRole === 'supervisor') {
     await loadSupervisorAllowedStages();
@@ -547,12 +550,12 @@ function renderTable() {
   allDefects.forEach(d => {
     const tr = document.createElement('tr');
     tr.className = 'row-clickable';
-    const canReview = currentRole === 'admin' || currentRole === 'supervisor';
-    // مدير النظام يقدر يعدّل قرار أي عيب في أي وقت (حتى بعد ما يتاخد قرار قبل كده)
-    // المشرف بس يقدر يتصرف وهو لسه "قيد المراجعة" وعلى محطة هو مسؤول عنها فعلاً
+    const canReview = isFullAccess || currentRole === 'supervisor';
+    // الأدمن والمشرف العام يقدروا يعدّلوا قرار أي عيب في أي وقت (حتى بعد ما يتاخد قرار قبل كده)
+    // مشرف المحطة بس يقدر يتصرف وهو لسه "قيد المراجعة" وعلى محطة هو مسؤول عنها فعلاً
     const supervisorCanReviewThis = currentRole !== 'supervisor' || (supervisorAllowedStageIds && supervisorAllowedStageIds.has(d.stage_id));
-    const showActions = currentRole === 'admin' || (canReview && d.status === 'pending' && supervisorCanReviewThis);
-    const canSelect = currentRole === 'admin' || (currentRole === 'supervisor' && supervisorCanReviewThis);
+    const showActions = isFullAccess || (canReview && d.status === 'pending' && supervisorCanReviewThis);
+    const canSelect = isFullAccess || (currentRole === 'supervisor' && supervisorCanReviewThis);
 
     tr.innerHTML = `
       ${canSelect ? `<td onclick="event.stopPropagation()"><input type="checkbox" class="row-checkbox" data-id="${d.id}" data-status="${d.status}" /></td>` : ''}
@@ -864,21 +867,21 @@ async function openHistoryModal(defect) {
 
   // إظهار أزرار الاعتماد/الرفض لو المستخدم عنده صلاحية وحالة العيب لسه قيد المراجعة
   const actionsWrap = document.getElementById('historyActionsWrap');
-  const canReview = currentRole === 'admin' || currentRole === 'supervisor';
+  const canReview = isFullAccess || currentRole === 'supervisor';
   const supervisorCanReviewThis = currentRole !== 'supervisor' || (supervisorAllowedStageIds && supervisorAllowedStageIds.has(defect.stage_id));
   const showActionsHere = canReview && defect.status === 'pending' && supervisorCanReviewThis;
   actionsWrap.style.display = showActionsHere ? 'flex' : 'none';
 
-  // زرار التعديل اليدوي: متاح للأدمن دايمًا، وللمشرف بس على المحطات اللي هو مسؤول عنها
+  // زرار التعديل اليدوي: متاح للأدمن والمشرف العام دايمًا، ولمشرف المحطة بس على محطاته
   // ومتاح بغض النظر عن حالة العيب (حتى لو معتمد أو مرفوض بالفعل)
   const editWrap = document.getElementById('historyEditWrap');
   editWrap.style.display = (canReview && supervisorCanReviewThis) ? 'block' : 'none';
 
-  // مراجعة بلاغ الإصلاح: متاحة للأدمن دايمًا (حتى لو اتراجعت قبل كده)،
-  // وللمشرف المسؤول بس لو لسه في انتظار المراجعة
+  // مراجعة بلاغ الإصلاح: متاحة للأدمن والمشرف العام دايمًا (حتى لو اتراجعت قبل كده)،
+  // ولمشرف المحطة المسؤول بس لو لسه في انتظار المراجعة
   const repairWrap = document.getElementById('repairReviewWrap');
   const showRepairReview = supervisorCanReviewThis && (
-    (currentRole === 'admin' && defect.repair_status) ||
+    (isFullAccess && defect.repair_status) ||
     (currentRole === 'supervisor' && defect.repair_status === 'pending_review')
   );
   repairWrap.style.display = showRepairReview ? 'block' : 'none';
