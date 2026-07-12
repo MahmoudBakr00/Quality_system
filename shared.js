@@ -360,12 +360,15 @@ async function syncPendingDefects() {
     for (const item of queue) {
       try {
         console.log('🔄 محاولة مزامنة عيب:', item.localId, item.data);
-        const { error } = await sbClient.from('defects').insert([item.data]);
+        const { data: insertedRows, error, status, statusText } = await sbClient
+          .from('defects')
+          .insert([item.data])
+          .select('id, defect_code');
+
+        console.log('📡 رد السيرفر الكامل:', { insertedRows, error, status, statusText });
+
         if (error) {
-          console.error('❌ فشلت مزامنة العيب:', item.localId, 'الخطأ الكامل:', error);
-          // لو الخطأ بسبب تكرار (client_ref_id أو defect_code)، معناه العيب ده
-          // اتسجل بنجاح فعلاً من قبل (غالبًا من تاب تاني كان بيزامن في نفس اللحظة)
-          // نعتبرها نجحت، وقاعدة البيانات نفسها منعت أي صف مكرر يتكون من الأساس
+          console.error('❌ فشلت مزامنة العيب:', item.localId, 'الخطأ الكامل:', JSON.stringify(error));
           const isDuplicate = error.code === '23505';
           if (isDuplicate) {
             console.warn('⚠️ اتعامل معاها كتكرار حقيقي (كود 23505) - العيب ده كان موجود بالفعل');
@@ -373,8 +376,13 @@ async function syncPendingDefects() {
           } else {
             throw error;
           }
+        } else if (!insertedRows || insertedRows.length === 0) {
+          // مفيش خطأ ظاهر، بس كمان مفيش صف رجع فعليًا - ده مؤشر خطير إن الإدراج
+          // اترفض بصمت (زي Trigger أو RLS بيرجع بدون خطأ)
+          console.error('🚨🚨 تحذير خطير: الطلب "نجح" من غير خطأ، بس مفيش صف رجع من قاعدة البيانات! العيب ده على الأرجح ما اتسجلش فعليًا رغم عدم وجود خطأ ظاهر:', item.localId);
+          throw new Error('نجح الطلب لكن لم يتم إرجاع أي صف - يُشتبه في رفض صامت من قاعدة البيانات');
         } else {
-          console.log('✅ نجحت مزامنة العيب:', item.localId);
+          console.log('✅ نجحت مزامنة العيب فعليًا وتأكدنا من الصف:', item.localId, 'كود العيب:', insertedRows[0].defect_code);
           synced++;
         }
       } catch (e) {
