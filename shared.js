@@ -505,87 +505,155 @@ function saveRememberedEmail(email) {
 // بيشتغل فوق نفس الـ <select> الأصلي من غير ما يغيّر أي كود تاني
 // بيستخدمه أو بيسمعه (change event لسه شغال زي ما هو)
 // =========================================================
+function injectSearchableSelectStyles() {
+  if (document.getElementById('searchableSelectStyles')) return;
+  const style = document.createElement('style');
+  style.id = 'searchableSelectStyles';
+  style.textContent = `
+    .searchable-select-wrapper { position: relative; margin-bottom: 18px; user-select: none; }
+    .searchable-select-box {
+      width: 100%; padding: 12px 14px; border-radius: 8px;
+      background: #334155; color: #f1f5f9; font-size: 15px;
+      display: flex; justify-content: space-between; align-items: center;
+      cursor: pointer; border: 2px solid transparent;
+    }
+    .searchable-select-box.open { border-color: #3b82f6; border-radius: 8px 8px 0 0; }
+    .searchable-select-box.disabled { opacity: 0.6; cursor: not-allowed; }
+    .searchable-select-box .arrow { font-size: 11px; color: #94a3b8; transition: transform .15s; }
+    .searchable-select-box.open .arrow { transform: rotate(180deg); }
+    .searchable-select-box .box-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .searchable-select-box .box-label.placeholder { color: #94a3b8; }
+    .searchable-select-panel {
+      display: none; background: #1e293b; border: 2px solid #3b82f6; border-top: none;
+      border-radius: 0 0 8px 8px; overflow: hidden; position: absolute; top: 100%; right: 0; left: 0; z-index: 200;
+    }
+    .searchable-select-panel.open { display: block; }
+    .searchable-select-input {
+      width: 100%; padding: 10px 14px; border: none; border-bottom: 1px solid #334155;
+      background: #0f172a; color: #f1f5f9; font-size: 14px; margin: 0;
+    }
+    .searchable-select-input:focus { outline: none; }
+    .searchable-select-list { max-height: 220px; overflow-y: auto; }
+    .searchable-select-item {
+      padding: 10px 14px; cursor: pointer; font-size: 14px; color: #f1f5f9;
+    }
+    .searchable-select-item:hover { background: #334155; }
+    .searchable-select-item.selected { background: #3b82f6; color: white; }
+    .searchable-select-item.disabled { color: #64748b; cursor: not-allowed; }
+    .searchable-select-empty { padding: 10px 14px; color: #64748b; font-size: 13px; text-align: center; }
+  `;
+  document.head.appendChild(style);
+}
+
 function makeSelectSearchable(selectId) {
+  injectSearchableSelectStyles();
+
   const select = document.getElementById(selectId);
-  if (!select || select.dataset.searchable) return;
-  select.dataset.searchable = 'true';
+  if (!select || select.dataset.searchableInit) return;
+  select.dataset.searchableInit = '1';
 
   const wrapper = document.createElement('div');
-  wrapper.style.position = 'relative';
+  wrapper.className = 'searchable-select-wrapper';
   select.parentNode.insertBefore(wrapper, select);
   wrapper.appendChild(select);
-  select.style.position = 'absolute';
-  select.style.opacity = '0';
-  select.style.height = '0';
-  select.style.pointerEvents = 'none';
+  select.style.display = 'none';
 
-  const searchInput = document.createElement('input');
-  searchInput.type = 'text';
-  searchInput.autocomplete = 'off';
-  searchInput.readOnly = false;
-  searchInput.style.cssText = (select.getAttribute('style') || '') + '; cursor:pointer; padding-left:32px;';
-  searchInput.className = select.className;
-  searchInput.placeholder = 'اضغط للاختيار أو اكتب للبحث...';
-  wrapper.appendChild(searchInput);
-
-  const arrow = document.createElement('div');
+  // الصندوق الظاهر (زي الـ select العادي)
+  const box = document.createElement('div');
+  box.className = 'searchable-select-box';
+  box.tabIndex = 0;
+  const boxLabel = document.createElement('span');
+  boxLabel.className = 'box-label';
+  const arrow = document.createElement('span');
+  arrow.className = 'arrow';
   arrow.textContent = '▼';
-  arrow.style.cssText = 'position:absolute; left:12px; top:50%; transform:translateY(-50%); color:#94a3b8; font-size:11px; pointer-events:none;';
-  wrapper.appendChild(arrow);
+  box.appendChild(boxLabel);
+  box.appendChild(arrow);
+  wrapper.appendChild(box);
 
-  const dropdown = document.createElement('div');
-  dropdown.style.cssText = 'display:none; position:absolute; top:100%; right:0; left:0; background:#1e293b; border:1px solid #334155; border-radius:8px; max-height:220px; overflow-y:auto; z-index:200; margin-top:4px; box-shadow:0 8px 24px rgba(0,0,0,0.5);';
-  wrapper.appendChild(dropdown);
+  // اللوحة اللي بتفتح تحت (input + list)
+  const panel = document.createElement('div');
+  panel.className = 'searchable-select-panel';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'searchable-select-input';
+  input.autocomplete = 'off';
+  input.placeholder = 'اكتب للبحث...';
+  const list = document.createElement('div');
+  list.className = 'searchable-select-list';
+  panel.appendChild(input);
+  panel.appendChild(list);
+  wrapper.appendChild(panel);
 
-  function getOptions() {
-    return Array.from(select.options);
-  }
-
-  function syncDisplay() {
-    const selected = select.options[select.selectedIndex];
-    searchInput.value = selected ? selected.textContent : '';
-  }
-
-  function renderDropdown(filterText) {
-    const q = (filterText || '').trim().toLowerCase();
-    const items = getOptions().filter(o => !q || o.textContent.toLowerCase().includes(q));
-    if (items.length === 0) {
-      dropdown.innerHTML = '<div style="padding:10px 12px; color:#64748b; font-size:12px;">لا توجد نتائج</div>';
+  function buildList(filter) {
+    list.innerHTML = '';
+    const term = (filter || '').trim().toLowerCase();
+    const opts = Array.from(select.options);
+    const filtered = term ? opts.filter(o => o.textContent.toLowerCase().includes(term)) : opts;
+    if (filtered.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'searchable-select-empty';
+      empty.textContent = 'لا توجد نتائج';
+      list.appendChild(empty);
       return;
     }
-    dropdown.innerHTML = items.map(o => `<div class="searchable-option" data-value="${o.value.replace(/"/g, '&quot;')}" style="padding:9px 12px; cursor:pointer; font-size:13px; color:#f1f5f9;">${o.textContent}</div>`).join('');
-    dropdown.querySelectorAll('.searchable-option').forEach(el => {
-      el.addEventListener('mousedown', (e) => {
+    filtered.forEach(o => {
+      const item = document.createElement('div');
+      item.className = 'searchable-select-item';
+      if (o.disabled) item.classList.add('disabled');
+      if (o.value === select.value) item.classList.add('selected');
+      item.textContent = o.textContent;
+      item.addEventListener('mousedown', (e) => {
         e.preventDefault();
-        select.value = el.dataset.value;
+        if (o.disabled) return;
+        select.value = o.value;
+        closePanel();
         select.dispatchEvent(new Event('change'));
-        syncDisplay();
-        dropdown.style.display = 'none';
       });
-      el.addEventListener('mouseenter', () => { el.style.background = '#334155'; });
-      el.addEventListener('mouseleave', () => { el.style.background = 'transparent'; });
+      list.appendChild(item);
     });
   }
 
-  searchInput.addEventListener('focus', () => {
-    renderDropdown('');
-    dropdown.style.display = 'block';
-    searchInput.select();
-  });
-  searchInput.addEventListener('input', () => {
-    renderDropdown(searchInput.value);
-    dropdown.style.display = 'block';
-  });
-  searchInput.addEventListener('blur', () => {
-    setTimeout(() => { dropdown.style.display = 'none'; syncDisplay(); }, 150);
-  });
+  function openPanel() {
+    if (select.disabled) return;
+    box.classList.add('open');
+    panel.classList.add('open');
+    input.value = '';
+    buildList('');
+    input.focus();
+  }
+  function closePanel() {
+    box.classList.remove('open');
+    panel.classList.remove('open');
+    syncBox();
+  }
+  function togglePanel() {
+    panel.classList.contains('open') ? closePanel() : openPanel();
+  }
+  function syncBox() {
+    const opt = select.options[select.selectedIndex];
+    if (opt && opt.value) {
+      boxLabel.textContent = opt.textContent;
+      boxLabel.classList.remove('placeholder');
+    } else {
+      boxLabel.textContent = opt ? opt.textContent : 'اختر...';
+      boxLabel.classList.add('placeholder');
+    }
+    box.classList.toggle('disabled', select.disabled);
+  }
 
-  // لو الـ select اتغير برمجيًا من كود تاني (زي التحميل التلقائي للمحطة الوحيدة)
-  select.addEventListener('change', syncDisplay);
-  const observer = new MutationObserver(syncDisplay);
-  observer.observe(select, { childList: true });
+  box.addEventListener('click', () => { if (!select.disabled) togglePanel(); });
+  input.addEventListener('input', () => buildList(input.value));
+  document.addEventListener('click', (e) => { if (!wrapper.contains(e.target)) closePanel(); });
 
-  syncDisplay();
+  const observer = new MutationObserver(() => {
+    syncBox();
+    if (panel.classList.contains('open')) buildList(input.value);
+  });
+  observer.observe(select, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled'] });
+
+  select.addEventListener('change', syncBox);
+  syncBox();
 }
 
 function getRememberedEmail() {
