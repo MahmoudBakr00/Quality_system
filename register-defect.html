@@ -170,6 +170,14 @@ document.getElementById('photoInput').addEventListener('change', async (e) => {
   }
 });
 
+// تصفير خانات الفورم بعد كل تسجيل - بشكل يدوي ومحدد (بدل form.reset() الجارف)
+// عشان منلمسش قائمة المحطات المحمّلة بالفعل (كانت بترجع لحالة "جاري التحميل" في بعض المتصفحات)
+function resetFormFieldsOnly() {
+  document.getElementById('serialInput').value = '';
+  document.getElementById('descriptionInput').value = '';
+  document.getElementById('photoInput').value = '';
+}
+
 async function init() {
   applyTranslations();
   renderLangToggle('langToggleWrap');
@@ -421,7 +429,7 @@ document.getElementById('defectForm').addEventListener('submit', async (e) => {
       ? `✅ تم تسجيل العيب بنجاح! كود العيب: ${insertedData.defect_code}`
       : '✅ تم تسجيل العيب بنجاح!';
     successMsg.style.display = 'block';
-    document.getElementById('defectForm').reset(); compressedPhotoBlob = null; currentDefectCode = null; document.getElementById('photoPreviewWrap').style.display = 'none'; if (singleAllowedStageId) { document.getElementById('stageSelect').value = singleAllowedStageId; document.getElementById('stageSelect').dispatchEvent(new Event('change')); } document.getElementById('serialInput').focus();
+    resetFormFieldsOnly(); compressedPhotoBlob = null; currentDefectCode = null; document.getElementById('photoPreviewWrap').style.display = 'none'; if (singleAllowedStageId) { document.getElementById('stageSelect').value = singleAllowedStageId; } else { document.getElementById('stageSelect').value = ''; } document.getElementById('stageSelect').dispatchEvent(new Event('change')); document.getElementById('serialInput').focus();
     document.getElementById('jobOrderPreview').style.display = 'none';
     document.getElementById('defectTypeSelect').innerHTML = '<option value="">-- اختر نوع العيب (اختياري) --</option>';
     setTimeout(() => { successMsg.style.display = 'none'; }, 4000);
@@ -430,7 +438,7 @@ document.getElementById('defectForm').addEventListener('submit', async (e) => {
     queueDefectOffline(defectPayload);
     successMsg.textContent = '📴 لا يوجد اتصال بالإنترنت حاليًا. تم حفظ العيب محليًا وسيتم رفعه تلقائيًا عند عودة الاتصال.';
     successMsg.style.display = 'block';
-    document.getElementById('defectForm').reset(); compressedPhotoBlob = null; currentDefectCode = null; document.getElementById('photoPreviewWrap').style.display = 'none'; if (singleAllowedStageId) { document.getElementById('stageSelect').value = singleAllowedStageId; document.getElementById('stageSelect').dispatchEvent(new Event('change')); } document.getElementById('serialInput').focus();
+    resetFormFieldsOnly(); compressedPhotoBlob = null; currentDefectCode = null; document.getElementById('photoPreviewWrap').style.display = 'none'; if (singleAllowedStageId) { document.getElementById('stageSelect').value = singleAllowedStageId; } else { document.getElementById('stageSelect').value = ''; } document.getElementById('stageSelect').dispatchEvent(new Event('change')); document.getElementById('serialInput').focus();
     document.getElementById('jobOrderPreview').style.display = 'none';
     document.getElementById('defectTypeSelect').innerHTML = '<option value="">-- اختر نوع العيب (اختياري) --</option>';
     renderPendingBadge('pendingBadgeWrap');
