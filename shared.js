@@ -302,6 +302,26 @@ function getPendingCount() {
   return getPendingQueue().length;
 }
 
+// =========================================================
+// توليد كود عيب فريد من المتصفح نفسه (تاريخ + جزء عشوائي)
+// بيتولد فور ما الفني يسحب السيريال، عشان يضمن عدم التكرار
+// حتى لو النت مقطوع أو المزامنة اتكررت لأي سبب
+// شكل الكود: 20260712-A3F9K2
+// =========================================================
+function generateDefectCode() {
+  const today = new Date();
+  const datePart = today.getFullYear().toString()
+    + String(today.getMonth() + 1).padStart(2, '0')
+    + String(today.getDate()).padStart(2, '0');
+
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // بدون حروف/أرقام ممكن تتلخبط زي O/0 أو I/1
+  let randomPart = '';
+  for (let i = 0; i < 6; i++) {
+    randomPart += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return datePart + '-' + randomPart;
+}
+
 // يحفظ العيب محليًا لما التسجيل يفشل بسبب الاتصال
 function queueDefectOffline(defectData) {
   const queue = getPendingQueue();
@@ -341,9 +361,12 @@ async function syncPendingDefects() {
       try {
         const { error } = await sbClient.from('defects').insert([item.data]);
         if (error) {
-          // لو الخطأ بسبب تكرار client_ref_id، معناه العيب ده اتسجل بنجاح
-          // فعلاً من قبل (غالبًا من تاب تاني كان بيزامن في نفس اللحظة) - نعتبرها نجحت
-          const isDuplicate = error.code === '23505' || (error.message || '').includes('client_ref_id');
+          // لو الخطأ بسبب تكرار (client_ref_id أو defect_code)، معناه العيب ده
+          // اتسجل بنجاح فعلاً من قبل (غالبًا من تاب تاني كان بيزامن في نفس اللحظة)
+          // نعتبرها نجحت، وقاعدة البيانات نفسها منعت أي صف مكرر يتكون من الأساس
+          const isDuplicate = error.code === '23505'
+            || (error.message || '').includes('client_ref_id')
+            || (error.message || '').includes('defect_code');
           if (isDuplicate) {
             synced++;
           } else {
