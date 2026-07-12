@@ -7,7 +7,7 @@
 // - طلبات Supabase (بيانات حية): بتتجاهل تمامًا، بتروح للنت مباشرة.
 // =========================================================
 
-const CACHE_NAME = 'defect-system-cache-v5';
+const CACHE_NAME = 'defect-system-cache-v6';
 
 const PRECACHE_URLS = [
   './',
@@ -57,6 +57,47 @@ self.addEventListener('activate', (event) => {
 function isCdnLibrary(url) {
   return CDN_LIBRARY_URLS.some((u) => url.startsWith(u));
 }
+
+// =========================================================
+// استقبال إشعارات التليفون (Web Push) وعرضها حتى لو التطبيق مقفول
+// =========================================================
+self.addEventListener('push', (event) => {
+  let data = { title: '🚨 إشعار جديد', body: 'لديك إشعار جديد في نظام تسجيل العيوب', related_id: null };
+  try {
+    if (event.data) data = event.data.json();
+  } catch (e) {
+    // لو البيانات مش JSON صالح، استخدم القيم الافتراضية
+  }
+
+  const options = {
+    body: data.body,
+    icon: 'icon-192.png',
+    badge: 'icon-192.png',
+    dir: 'rtl',
+    lang: 'ar',
+    data: { related_id: data.related_id || null },
+  };
+
+  event.waitUntil(self.registration.showNotification(data.title, options));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const relatedId = event.notification.data?.related_id;
+  const targetUrl = relatedId ? `dashboard.html?defect_id=${relatedId}` : 'home.html';
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ('focus' in client) {
+          client.navigate(targetUrl);
+          return client.focus();
+        }
+      }
+      return clients.openWindow(targetUrl);
+    })
+  );
+});
 
 self.addEventListener('fetch', (event) => {
   const url = event.request.url;
