@@ -317,18 +317,24 @@ function getPendingCount() {
 // حتى لو النت مقطوع أو المزامنة اتكررت لأي سبب
 // شكل الكود: 20260712-A3F9K2
 // =========================================================
-function generateDefectCode() {
-  const today = new Date();
-  const datePart = today.getFullYear().toString()
-    + String(today.getMonth() + 1).padStart(2, '0')
-    + String(today.getDate()).padStart(2, '0');
+// =========================================================
+// توليد كود عيب فريد يعتمد على اسم المستخدم + رقم تسلسلي خاص بيه
+// (بدل التاريخ + عشوائي) - عشان الكود يبقى دلالة واضحة على مين سجّله
+// وميتكررش حتى لو 2 فنيين مختلفين سجلوا في نفس اللحظة بالظبط أوفلاين
+// شكل الكود: AHMED-00001
+// =========================================================
+function generateDefectCode(userEmail) {
+  const usernamePart = (userEmail || 'USER')
+    .split('@')[0]
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .toUpperCase()
+    .slice(0, 10) || 'USER';
 
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // بدون حروف/أرقام ممكن تتلخبط زي O/0 أو I/1
-  let randomPart = '';
-  for (let i = 0; i < 6; i++) {
-    randomPart += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return datePart + '-' + randomPart;
+  const counterKey = 'defect_code_counter_' + usernamePart;
+  const counter = parseInt(localStorage.getItem(counterKey) || '0', 10) + 1;
+  localStorage.setItem(counterKey, String(counter));
+
+  return usernamePart + '-' + String(counter).padStart(5, '0');
 }
 
 // يحفظ العيب محليًا لما التسجيل يفشل بسبب الاتصال
@@ -604,8 +610,12 @@ function makeSelectSearchable(selectId) {
 
   function buildList(filter) {
     list.innerHTML = '';
+    // نجيب الـ select الحقيقي من الصفحة نفسها في كل مرة (مش نسخة قديمة محفوظة)
+    // عشان نضمن إننا شايفين آخر تحديث حصل عليه دايمًا
+    const liveSelect = document.getElementById(selectId) || select;
     const term = (filter || '').trim().toLowerCase();
-    const opts = Array.from(select.options);
+    const opts = Array.from(liveSelect.options);
+    console.log('🔍 buildList: عدد الخيارات الفعلية في الـ select دلوقتي:', opts.length);
     const filtered = term ? opts.filter(o => o.textContent.toLowerCase().includes(term)) : opts;
     if (filtered.length === 0) {
       const empty = document.createElement('div');
@@ -618,14 +628,14 @@ function makeSelectSearchable(selectId) {
       const item = document.createElement('div');
       item.className = 'searchable-select-item';
       if (o.disabled) item.classList.add('disabled');
-      if (o.value === select.value) item.classList.add('selected');
+      if (o.value === liveSelect.value) item.classList.add('selected');
       item.textContent = o.textContent;
       item.addEventListener('mousedown', (e) => {
         e.preventDefault();
         if (o.disabled) return;
-        select.value = o.value;
+        liveSelect.value = o.value;
         closePanel();
-        select.dispatchEvent(new Event('change'));
+        liveSelect.dispatchEvent(new Event('change'));
       });
       list.appendChild(item);
     });
