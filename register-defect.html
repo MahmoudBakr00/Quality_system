@@ -191,8 +191,6 @@ async function init() {
   renderNotificationBell('notifBellWrap', auth.user.id);
   syncFormDataForOffline(); // نسخة خفيفة (محطات + أنواع عيوب بس) عشان الصفحة متبطأش
   loadStages();
-  makeSelectSearchable('stageSelect');
-  makeSelectSearchable('defectTypeSelect');
 
   // نحط المؤشر في خانة السيريال مباشرة عشان يقدر يسكن بالباركود ريدر
   // أو يكتب فورًا من غير ما يحتاج يدوس على الخانة يدوي
