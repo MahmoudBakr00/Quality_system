@@ -319,6 +319,7 @@ function getPendingCount() {
 // شكل الكود: 20260712-A3F9K2
 // =========================================================
 const CACHED_USER_CODE_KEY = 'cached_user_code';
+const DEVICE_CODE_KEY = 'device_code';
 
 function cacheUserCode(userCode) {
   if (userCode) localStorage.setItem(CACHED_USER_CODE_KEY, userCode);
@@ -327,14 +328,26 @@ function getCachedUserCode() {
   return localStorage.getItem(CACHED_USER_CODE_KEY) || 'XXXX';
 }
 
+// رمز جهاز ثابت (حرفين) بيتولد مرة واحدة بس لكل جهاز/متصفح، ويتخزن للأبد
+// عشان لو نفس الحساب شغال من أكتر من جهاز في نفس الوقت، الأكواد متتعارضش أبدًا
+function getDeviceCode() {
+  let code = localStorage.getItem(DEVICE_CODE_KEY);
+  if (!code) {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    code = chars[Math.floor(Math.random() * chars.length)] + chars[Math.floor(Math.random() * chars.length)];
+    localStorage.setItem(DEVICE_CODE_KEY, code);
+  }
+  return code;
+}
+
 // =========================================================
-// توليد كود عيب فريد بالشكل: [كود الحساب 4 خانات][تاريخ يوم شهر سنتين][رقم تسلسلي 3 خانات]
-// مثال: A3F9-120726-001
-// الرقم التسلسلي بيتصفّر كل يوم لنفس الحساب، والتاريخ بيمنع أي تكرار بين الأيام
-// وكود الحساب بيمنع أي تكرار بين حسابات مختلفة حتى لو سجلوا في نفس اللحظة أوفلاين
+// توليد كود عيب فريد بالشكل: [كود الحساب 4 خانات][رمز الجهاز حرفين]-[تاريخ يوم شهر سنتين]-[رقم تسلسلي 3 خانات]
+// مثال: A3F9K7-120726-001
+// الرقم التسلسلي بيتصفّر كل يوم لنفس الحساب على نفس الجهاز، والتاريخ بيمنع أي تكرار بين الأيام
+// وكود الحساب + رمز الجهاز بيمنعوا أي تكرار حتى لو نفس الحساب شغال على أكتر من جهاز في نفس اللحظة أوفلاين
 // =========================================================
 function generateDefectCode(userCode) {
-  const code = userCode || getCachedUserCode();
+  const code = (userCode || getCachedUserCode()) + getDeviceCode();
   const today = new Date();
   const datePart = String(today.getDate()).padStart(2, '0')
     + String(today.getMonth() + 1).padStart(2, '0')
