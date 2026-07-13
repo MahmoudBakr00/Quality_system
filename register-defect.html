@@ -248,6 +248,7 @@ function renderStagesOptions(data) {
     o.textContent = s.name + (s.line_no ? ' (خط ' + s.line_no + ')' : '');
     select.appendChild(o);
   });
+  refreshSearchableSelect('stageSelect');
 
   // لو الحساب متخصص بمحطة واحدة بس، نختارها تلقائيًا ونخفي خانة الاختيار
   // عشان الفني يروح مباشرة لاختيار نوع العيب من غير خطوة زيادة
@@ -255,6 +256,7 @@ function renderStagesOptions(data) {
     singleAllowedStageId = data[0].id;
     select.value = data[0].id;
     wrap.style.display = 'none';
+    refreshSearchableSelect('stageSelect');
     loadDefectTypesForStage(data[0].id);
   } else {
     singleAllowedStageId = null;
@@ -273,7 +275,7 @@ async function loadDefectTypesForStage(stageId) {
     console.log('📴 مفيش نت - هنستخدم أنواع العيوب المحفوظة محليًا للمحطة:', stageId);
     const cached = getCachedDefectTypes(stageId);
     console.log('📦 عدد أنواع العيوب المحفوظة لهذه المحطة:', cached.length);
-    renderDefectTypeOptions(cached);
+    renderDefectTypeOptions(cached); refreshSearchableSelect('defectTypeSelect');
     if (cached.length === 0) {
       dtSelect.innerHTML += '<option value="" disabled>⚠️ لا توجد أنواع عيوب محفوظة محليًا لهذه المحطة</option>';
     }
@@ -285,11 +287,11 @@ async function loadDefectTypesForStage(stageId) {
     if (error) throw error;
     console.log('✅ تم تحميل أنواع العيوب من النت:', data.length);
     cacheDefectTypes(stageId, data);
-    renderDefectTypeOptions(data);
+    renderDefectTypeOptions(data); refreshSearchableSelect('defectTypeSelect');
   } catch (err) {
     console.warn('⚠️ فشل تحميل أنواع العيوب من النت رغم إن navigator.onLine=true، هنستخدم النسخة المحفوظة:', err);
     const cached = getCachedDefectTypes(stageId);
-    renderDefectTypeOptions(cached);
+    renderDefectTypeOptions(cached); refreshSearchableSelect('defectTypeSelect');
     if (cached.length === 0) {
       dtSelect.innerHTML += '<option value="" disabled>⚠️ لا توجد أنواع عيوب محفوظة محليًا لهذه المحطة</option>';
     }
