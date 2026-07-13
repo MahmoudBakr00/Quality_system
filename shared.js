@@ -922,17 +922,24 @@ function renderDiagnosticsPanel(containerId) {
     const online = navigator.onLine;
 
     let defectTypesCount = 0;
+    let defectTypesByStage = '';
     try {
       const grouped = JSON.parse(localStorage.getItem(CACHE_DEFECT_TYPES_KEY) || '{}');
       defectTypesCount = Object.values(grouped).reduce((sum, arr) => sum + (arr ? arr.length : 0), 0);
-    } catch (e) { defectTypesCount = 0; }
+      defectTypesByStage = Object.entries(grouped).map(([stageId, types]) => {
+        const stageName = (stages.find(s => s.id === stageId) || {}).name || stageId;
+        return `${stageName}: ${(types || []).length}`;
+      }).join(' | ') || 'لا يوجد';
+    } catch (e) { defectTypesCount = 0; defectTypesByStage = 'خطأ في القراءة'; }
 
     container.innerHTML = `
       <div style="background:#0f172a; border:1px solid #334155; border-radius:10px; padding:14px; font-size:12px; color:#cbd5e1; direction:ltr; text-align:left;">
         <div style="font-weight:bold; color:#60a5fa; margin-bottom:8px; direction:rtl; text-align:right;">🔧 لوحة التشخيص</div>
         <div>الاتصال بالنت (navigator.onLine): <b style="color:${online ? '#4ade80' : '#f87171'}">${online ? 'متصل ✅' : 'غير متصل ❌'}</b></div>
         <div>عدد المحطات المحفوظة محليًا: <b>${stages.length}</b></div>
+        <div style="direction:rtl; text-align:right; color:#fbbf24; margin:4px 0;">أسماء المحطات المحفوظة: ${stages.length > 0 ? stages.map(s => s.name).join('، ') : '⚠️ لا توجد أي محطة محفوظة'}</div>
         <div>عدد أنواع العيوب المحفوظة محليًا (كل المحطات): <b>${defectTypesCount}</b></div>
+        <div style="direction:rtl; text-align:right; color:#a78bfa; margin:4px 0;">تفصيل أنواع العيوب لكل محطة: ${defectTypesByStage}</div>
         <div>عدد العيوب المحفوظة محليًا (نسخة كاملة): <b>${allDefectsCached.length}</b></div>
         <div>عدد العيوب في انتظار الرفع: <b>${pendingCount}</b></div>
         <div>آخر مزامنة شاملة ناجحة: <b>${lastSync ? formatDate(lastSync) : 'لم تتم أبدًا'}</b></div>
