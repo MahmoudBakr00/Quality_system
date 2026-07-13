@@ -152,13 +152,14 @@ async function requireAuth(allowedRoles = null) {
     try {
       const { data: profile, error } = await sbClient
         .from('profiles')
-        .select('role')
+        .select('role, user_code')
         .eq('id', user.id)
         .single();
 
       if (error) throw error;
       role = profile.role;
       localStorage.setItem(CACHED_ROLE_KEY, role); // نخزن آخر دور معروف عشان نستخدمه لو الشبكة فشلت المرة الجاية
+      cacheUserCode(profile.user_code);
     } catch (err) {
       // فشل جلب الدور (غالبًا انقطاع/بطء مؤقت في النت) - نستخدم آخر دور محفوظ بدل ما نعمل تسجيل خروج قسري
       console.warn('تعذر جلب بيانات المستخدم، سيتم استخدام آخر دور محفوظ محليًا:', err);
@@ -317,24 +318,33 @@ function getPendingCount() {
 // حتى لو النت مقطوع أو المزامنة اتكررت لأي سبب
 // شكل الكود: 20260712-A3F9K2
 // =========================================================
-// =========================================================
-// توليد كود عيب فريد يعتمد على اسم المستخدم + رقم تسلسلي خاص بيه
-// (بدل التاريخ + عشوائي) - عشان الكود يبقى دلالة واضحة على مين سجّله
-// وميتكررش حتى لو 2 فنيين مختلفين سجلوا في نفس اللحظة بالظبط أوفلاين
-// شكل الكود: AHMED-00001
-// =========================================================
-function generateDefectCode(userEmail) {
-  const usernamePart = (userEmail || 'USER')
-    .split('@')[0]
-    .replace(/[^a-zA-Z0-9]/g, '')
-    .toUpperCase()
-    .slice(0, 10) || 'USER';
+const CACHED_USER_CODE_KEY = 'cached_user_code';
 
-  const counterKey = 'defect_code_counter_' + usernamePart;
+function cacheUserCode(userCode) {
+  if (userCode) localStorage.setItem(CACHED_USER_CODE_KEY, userCode);
+}
+function getCachedUserCode() {
+  return localStorage.getItem(CACHED_USER_CODE_KEY) || 'XXXX';
+}
+
+// =========================================================
+// توليد كود عيب فريد بالشكل: [كود الحساب 4 خانات][تاريخ يوم شهر سنتين][رقم تسلسلي 3 خانات]
+// مثال: A3F9-120726-001
+// الرقم التسلسلي بيتصفّر كل يوم لنفس الحساب، والتاريخ بيمنع أي تكرار بين الأيام
+// وكود الحساب بيمنع أي تكرار بين حسابات مختلفة حتى لو سجلوا في نفس اللحظة أوفلاين
+// =========================================================
+function generateDefectCode(userCode) {
+  const code = userCode || getCachedUserCode();
+  const today = new Date();
+  const datePart = String(today.getDate()).padStart(2, '0')
+    + String(today.getMonth() + 1).padStart(2, '0')
+    + String(today.getFullYear()).slice(-2);
+
+  const counterKey = 'defect_code_counter_' + code + '_' + datePart;
   const counter = parseInt(localStorage.getItem(counterKey) || '0', 10) + 1;
   localStorage.setItem(counterKey, String(counter));
 
-  return usernamePart + '-' + String(counter).padStart(5, '0');
+  return code + '-' + datePart + '-' + String(counter).padStart(3, '0');
 }
 
 // يحفظ العيب محليًا لما التسجيل يفشل بسبب الاتصال
@@ -950,6 +960,8 @@ function renderDiagnosticsPanel(containerId) {
   const container = document.getElementById(containerId);
   if (!container) return;
 
+  let expanded = false;
+
   function update() {
     const stages = getCachedStages();
     const allDefectsCached = getCachedAllDefects();
@@ -969,18 +981,30 @@ function renderDiagnosticsPanel(containerId) {
     } catch (e) { defectTypesCount = 0; defectTypesByStage = 'خطأ في القراءة'; }
 
     container.innerHTML = `
-      <div style="background:#0f172a; border:1px solid #334155; border-radius:10px; padding:14px; font-size:12px; color:#cbd5e1; direction:ltr; text-align:left;">
-        <div style="font-weight:bold; color:#60a5fa; margin-bottom:8px; direction:rtl; text-align:right;">🔧 لوحة التشخيص</div>
-        <div>الاتصال بالنت (navigator.onLine): <b style="color:${online ? '#4ade80' : '#f87171'}">${online ? 'متصل ✅' : 'غير متصل ❌'}</b></div>
-        <div>عدد المحطات المحفوظة محليًا: <b>${stages.length}</b></div>
-        <div style="direction:rtl; text-align:right; color:#fbbf24; margin:4px 0;">أسماء المحطات المحفوظة: ${stages.length > 0 ? stages.map(s => s.name).join('، ') : '⚠️ لا توجد أي محطة محفوظة'}</div>
-        <div>عدد أنواع العيوب المحفوظة محليًا (كل المحطات): <b>${defectTypesCount}</b></div>
-        <div style="direction:rtl; text-align:right; color:#a78bfa; margin:4px 0;">تفصيل أنواع العيوب لكل محطة: ${defectTypesByStage}</div>
-        <div>عدد العيوب المحفوظة محليًا (نسخة كاملة): <b>${allDefectsCached.length}</b></div>
-        <div>عدد العيوب في انتظار الرفع: <b>${pendingCount}</b></div>
-        <div>آخر مزامنة شاملة ناجحة: <b>${lastSync ? formatDate(lastSync) : 'لم تتم أبدًا'}</b></div>
+      <div style="background:#0f172a; border:1px solid #334155; border-radius:10px; font-size:12px; color:#cbd5e1; overflow:hidden;">
+        <div id="diagPanelHeader" style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; cursor:pointer;">
+          <span style="font-weight:bold; color:#60a5fa;">🔧 لوحة التشخيص <span style="color:#64748b; font-weight:normal;">(دوس هنا للتفاصيل)</span></span>
+          <span style="display:flex; align-items:center; gap:8px;">
+            <b style="color:${online ? '#4ade80' : '#f87171'}">${online ? 'متصل ✅' : 'غير متصل ❌'}</b>
+            <span id="diagPanelArrow" style="transition:transform .15s; display:inline-block; ${expanded ? 'transform:rotate(180deg);' : ''}">▼</span>
+          </span>
+        </div>
+        <div id="diagPanelBody" style="display:${expanded ? 'block' : 'none'}; padding:0 14px 14px; direction:ltr; text-align:left; border-top:1px solid #1e293b;">
+          <div style="padding-top:10px;">عدد المحطات المحفوظة محليًا: <b>${stages.length}</b></div>
+          <div style="direction:rtl; text-align:right; color:#fbbf24; margin:4px 0;">أسماء المحطات المحفوظة: ${stages.length > 0 ? stages.map(s => s.name).join('، ') : '⚠️ لا توجد أي محطة محفوظة'}</div>
+          <div>عدد أنواع العيوب المحفوظة محليًا (كل المحطات): <b>${defectTypesCount}</b></div>
+          <div style="direction:rtl; text-align:right; color:#a78bfa; margin:4px 0;">تفصيل أنواع العيوب لكل محطة: ${defectTypesByStage}</div>
+          <div>عدد العيوب المحفوظة محليًا (نسخة كاملة): <b>${allDefectsCached.length}</b></div>
+          <div>عدد العيوب في انتظار الرفع: <b>${pendingCount}</b></div>
+          <div>آخر مزامنة شاملة ناجحة: <b>${lastSync ? formatDate(lastSync) : 'لم تتم أبدًا'}</b></div>
+        </div>
       </div>
     `;
+
+    document.getElementById('diagPanelHeader').addEventListener('click', () => {
+      expanded = !expanded;
+      update();
+    });
   }
 
   update();
