@@ -88,6 +88,7 @@ textarea { resize: vertical; min-height: 80px; }
 <select id="defectTypeSelect">
   <option value="">-- اختر نوع العيب (اختياري) --</option>
 </select>
+<div id="dtDebugLine" style="background:#7c2d12; color:#fed7aa; padding:8px 12px; border-radius:6px; font-size:12px; margin:-10px 0 18px; font-weight:bold;">🔧 لسه محصلش أي تحميل لأنواع العيوب</div>
 
 <label data-i18n="description_label">وصف العيب (اختياري)</label>
 <textarea id="descriptionInput" placeholder="اكتب تفاصيل إضافية عن العيب..."></textarea>
@@ -312,6 +313,13 @@ function renderDefectTypeOptions(data) {
     o.dataset.name = dt.name;
     dtSelect.appendChild(o);
   });
+
+  // سطر تشخيص مباشر: يورينا فعليًا كام Option اتضاف للـ select الحقيقي
+  // وكام Option موجود فيه دلوقتي بالظبط (بغض النظر عن شكل الودجت)
+  const debugLine = document.getElementById('dtDebugLine');
+  if (debugLine) {
+    debugLine.textContent = `🔧 آخر تحميل: اتضاف ${(data || []).length} نوع عيب | إجمالي الخيارات في القائمة الآن: ${dtSelect.options.length} | الوقت: ${new Date().toLocaleTimeString('ar-EG')}`;
+  }
 }
 
 // معاينة الجوب أوردر لحظيًا
