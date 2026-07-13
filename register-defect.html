@@ -67,7 +67,6 @@ textarea { resize: vertical; min-height: 80px; }
 
 <div class="view">
 <h1 data-i18n="register_defect_title">🔍 تسجيل عيب جديد</h1>
-<div style="text-align:center; color:#f87171; font-size:11px; font-weight:bold; margin-bottom:14px;">🏷️ إصدار الكود: BUILD-2026-07-12-v2</div>
 <form id="defectForm">
 
 <label data-i18n="serial_label">السيريال</label>
@@ -76,6 +75,8 @@ textarea { resize: vertical; min-height: 80px; }
   <button type="button" class="scan-btn" id="openScannerBtn" data-i18n="scan_btn">📷 سكان</button>
 </div>
 <div class="job-order-preview" id="jobOrderPreview"></div>
+<div id="defectCodePreview" style="color:#fb923c; font-size:12px; font-weight:bold; margin:-10px 0 18px; display:none;"></div>
+<div id="defectCodePreview" style="color:#fb923c; font-size:12px; font-weight:bold; margin:-10px 0 18px; display:none;"></div>
 
 <div id="stageFieldWrap">
 <label data-i18n="stage_label">محطة الفحص</label>
@@ -88,7 +89,6 @@ textarea { resize: vertical; min-height: 80px; }
 <select id="defectTypeSelect">
   <option value="">-- اختر نوع العيب (اختياري) --</option>
 </select>
-<div id="dtDebugLine" style="background:#7c2d12; color:#fed7aa; padding:8px 12px; border-radius:6px; font-size:12px; margin:-10px 0 18px; font-weight:bold;">🔧 لسه محصلش أي تحميل لأنواع العيوب</div>
 
 <label data-i18n="description_label">وصف العيب (اختياري)</label>
 <textarea id="descriptionInput" placeholder="اكتب تفاصيل إضافية عن العيب..."></textarea>
@@ -329,13 +329,6 @@ function renderDefectTypeOptions(data) {
     o.dataset.name = dt.name;
     dtSelect.appendChild(o);
   });
-
-  // سطر تشخيص مباشر: يورينا فعليًا كام Option اتضاف للـ select الحقيقي
-  // وكام Option موجود فيه دلوقتي بالظبط (بغض النظر عن شكل الودجت)
-  const debugLine = document.getElementById('dtDebugLine');
-  if (debugLine) {
-    debugLine.textContent = `🔧 آخر تحميل: اتضاف ${(data || []).length} نوع عيب | إجمالي الخيارات في القائمة الآن: ${dtSelect.options.length} | الوقت: ${new Date().toLocaleTimeString('ar-EG')}`;
-  }
 }
 
 // معاينة الجوب أوردر لحظيًا
@@ -353,10 +346,14 @@ document.getElementById('serialInput').addEventListener('input', (e) => {
 
   // نولّد كود العيب فور ما السيريال يتحدد (سكان أو كتابة يدوية)، مرة واحدة بس لكل تسجيل
   // عشان يفضل ثابت حتى لو الفني عدّل حاجات تانية في الفورم قبل ما يدوس تسجيل
+  const codePreview = document.getElementById('defectCodePreview');
   if (e.target.value.trim() && !currentDefectCode) {
-    currentDefectCode = generateDefectCode();
+    currentDefectCode = generateDefectCode(getCachedUserCode());
+    codePreview.textContent = '🏷️ كود العيب: ' + currentDefectCode;
+    codePreview.style.display = 'block';
   } else if (!e.target.value.trim()) {
     currentDefectCode = null;
+    codePreview.style.display = 'none';
   }
 });
 
@@ -409,7 +406,7 @@ document.getElementById('defectForm').addEventListener('submit', async (e) => {
     technician_id: currentUser.id,
     technician_email: currentUser.email,
     // كود العيب اتولّد فور سحب السيريال (أو دلوقتي كحل احتياطي لو لأي سبب ما اتولدش)
-    defect_code: currentDefectCode || generateDefectCode(),
+    defect_code: currentDefectCode || generateDefectCode(getCachedUserCode()),
   };
 
   // تحقق من وجود عيوب مسجلة قبل كده بنفس التفاصيل (سيريال + محطة + نوع العيب)
