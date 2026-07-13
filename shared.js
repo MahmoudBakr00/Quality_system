@@ -662,10 +662,27 @@ function makeSelectSearchable(selectId) {
 
   select.addEventListener('change', syncBox);
   syncBox();
+
+  // نسجّل دالة تحديث قسرية لهذا الـ select عشان تتنادى من كود الصفحة
+  // مباشرة بعد أي تحميل بيانات جديد، من غير ما نعتمد بس على المراقبة التلقائية
+  searchableSelectRefreshers[selectId] = () => {
+    syncBox();
+    if (panel.classList.contains('open')) buildList(input.value);
+  };
 }
 
 function getRememberedEmail() {
   return localStorage.getItem(REMEMBERED_EMAIL_KEY) || '';
+}
+
+// دالة تحديث قسري لودجت البحث - تتنادى بعد أي تغيير برمجي لخيارات الـ select
+// (زي تحميل بيانات جديدة) عشان نضمن إن الودجت يعرض أحدث الخيارات فورًا
+// من غير ما نعتمد بس على المراقبة التلقائية (MutationObserver)
+const searchableSelectRefreshers = {};
+function refreshSearchableSelect(selectId) {
+  if (searchableSelectRefreshers[selectId]) {
+    searchableSelectRefreshers[selectId]();
+  }
 }
 
 // =========================================================
