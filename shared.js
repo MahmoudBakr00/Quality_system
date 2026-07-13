@@ -141,24 +141,33 @@ async function requireAuth(allowedRoles = null) {
   const user = session.user;
 
   let role = null;
-  try {
-    const { data: profile, error } = await sbClient
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .single();
 
-    if (error) throw error;
-    role = profile.role;
-    localStorage.setItem(CACHED_ROLE_KEY, role); // نخزن آخر دور معروف عشان نستخدمه لو الشبكة فشلت المرة الجاية
-  } catch (err) {
-    // فشل جلب الدور (غالبًا انقطاع/بطء مؤقت في النت) - نستخدم آخر دور محفوظ بدل ما نعمل تسجيل خروج قسري
-    console.warn('تعذر جلب بيانات المستخدم، سيتم استخدام آخر دور محفوظ محليًا:', err);
+  // لو مفيش نت أصلًا، منحاولش نجيب الدور من الشبكة خالص (كان بياخد ثواني لحد ما يفشل)
+  // نستخدم الدور المحفوظ محليًا فورًا
+  if (!navigator.onLine) {
     role = localStorage.getItem(CACHED_ROLE_KEY);
-    if (!role) {
-      // معندناش أي دور محفوظ خالص (أول مرة يفتح فيها الصفحة دي) - هنا فعلاً لازم نرجعه لتسجيل الدخول
-      window.location.href = 'index.html';
-      return null;
+  }
+
+  if (!role) {
+    try {
+      const { data: profile, error } = await sbClient
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single();
+
+      if (error) throw error;
+      role = profile.role;
+      localStorage.setItem(CACHED_ROLE_KEY, role); // نخزن آخر دور معروف عشان نستخدمه لو الشبكة فشلت المرة الجاية
+    } catch (err) {
+      // فشل جلب الدور (غالبًا انقطاع/بطء مؤقت في النت) - نستخدم آخر دور محفوظ بدل ما نعمل تسجيل خروج قسري
+      console.warn('تعذر جلب بيانات المستخدم، سيتم استخدام آخر دور محفوظ محليًا:', err);
+      role = localStorage.getItem(CACHED_ROLE_KEY);
+      if (!role) {
+        // معندناش أي دور محفوظ خالص (أول مرة يفتح فيها الصفحة دي) - هنا فعلاً لازم نرجعه لتسجيل الدخول
+        window.location.href = 'index.html';
+        return null;
+      }
     }
   }
 
