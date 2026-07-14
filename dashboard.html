@@ -170,6 +170,11 @@ tr.row-clickable { cursor: pointer; }
 <input type="date" id="filterDateFrom" />
 <label style="color:#94a3b8; font-size:12px;">إلى:</label>
 <input type="date" id="filterDateTo" />
+<select id="filterShift">
+  <option value="">كل الورديات</option>
+  <option value="day">☀️ نهار (8ص - 8م)</option>
+  <option value="night">🌙 ليل (8م - 8ص)</option>
+</select>
 <button id="applyFilter" data-i18n="filter_btn">🔍 تصفية</button>
 <button class="reset-btn" id="resetFilter" data-i18n="reset_btn">↺ إعادة تعيين</button>
 <button class="export-btn" id="exportBtn" data-i18n="export_btn">⬇ تصدير</button>
@@ -205,9 +210,9 @@ tr.row-clickable { cursor: pointer; }
 <table>
 <thead><tr>
   <th id="checkboxHeaderCell" style="display:none;"><input type="checkbox" id="selectAllCheckbox" /></th>
-  <th data-i18n="col_serial">السيريال</th><th>كود العيب</th><th data-i18n="col_job_order">الجوب أوردر</th><th data-i18n="col_station">المحطة</th><th>خط الإنتاج</th><th data-i18n="col_defect_type">نوع العيب</th><th>وصف العيب</th><th>الصورة</th><th data-i18n="col_status">الحالة</th><th>حالة الإصلاح</th><th data-i18n="col_technician">الفني</th><th data-i18n="col_date">التاريخ</th><th>المُراجِع</th><th>تاريخ الإغلاق</th><th>ملاحظة المراجعة</th><th></th>
+  <th data-i18n="col_serial">السيريال</th><th>كود العيب</th><th data-i18n="col_job_order">الجوب أوردر</th><th data-i18n="col_station">المحطة</th><th>خط الإنتاج</th><th data-i18n="col_defect_type">نوع العيب</th><th>وصف العيب</th><th>الصورة</th><th data-i18n="col_status">الحالة</th><th>حالة الإصلاح</th><th data-i18n="col_technician">الفني</th><th data-i18n="col_date">التاريخ</th><th>الوردية</th><th>المُراجِع</th><th>تاريخ الإغلاق</th><th>ملاحظة المراجعة</th><th></th>
 </tr></thead>
-<tbody id="tbody"><tr><td colspan="17" class="loading">⏳ جاري التحميل...</td></tr></tbody>
+<tbody id="tbody"><tr><td colspan="18" class="loading">⏳ جاري التحميل...</td></tr></tbody>
 </table>
 </div>
 </div>
@@ -424,7 +429,7 @@ document.getElementById('photoLightboxClose').addEventListener('click', () => {
 // ============ تحميل العيوب ============
 async function loadDefects() {
   const tbody = document.getElementById('tbody');
-  tbody.innerHTML = `<tr><td colspan="17" class="loading">⏳ جاري التحميل...</td></tr>`;
+  tbody.innerHTML = `<tr><td colspan="18" class="loading">⏳ جاري التحميل...</td></tr>`;
 
   const stageId = document.getElementById('filterStage').value;
   const status = document.getElementById('filterStatus').value;
@@ -435,6 +440,7 @@ async function loadDefects() {
   const lineSearch = document.getElementById('filterLine').value.trim();
   const dateFrom = document.getElementById('filterDateFrom').value;
   const dateTo = document.getElementById('filterDateTo').value;
+  const shiftFilter = document.getElementById('filterShift').value;
 
   let query = sbClient.from('defects').select('*, stages(name, line_no)').order('created_at', { ascending: false });
   if (stageId) query = query.eq('stage_id', stageId);
@@ -449,10 +455,11 @@ async function loadDefects() {
   try {
     const { data, error } = await query;
     if (error) throw error;
-    // فلتر خط الإنتاج بنعمله على الناتج (لأنه جوه علاقة stages مش عمود مباشر)
-    allDefects = lineSearch
-      ? (data || []).filter(d => (d.stages?.line_no || '').toLowerCase().includes(lineSearch.toLowerCase()))
-      : (data || []);
+    // فلتر خط الإنتاج والوردية بنعملهم على الناتج (مش أعمدة مباشرة نقدر نفلتر بيها من قاعدة البيانات)
+    let results = data || [];
+    if (lineSearch) results = results.filter(d => (d.stages?.line_no || '').toLowerCase().includes(lineSearch.toLowerCase()));
+    if (shiftFilter) results = results.filter(d => getShiftLabel(d.created_at) === shiftFilter);
+    allDefects = results;
   } catch (err) {
     // مفيش نت - استخدم النسخة المحفوظة محليًا وفلترها بنفسنا بنفس معايير الفلتر
     let cached = getCachedAllDefects();
@@ -475,6 +482,7 @@ async function loadDefects() {
     );
     if (dateFrom) cached = cached.filter(d => d.created_at >= dateFrom + 'T00:00:00');
     if (dateTo) cached = cached.filter(d => d.created_at <= dateTo + 'T23:59:59');
+    if (shiftFilter) cached = cached.filter(d => getShiftLabel(d.created_at) === shiftFilter);
     allDefects = cached;
   }
 
@@ -541,7 +549,7 @@ async function renderSerialHistoryPanel(searchTerm) {
 function renderTable() {
   const tbody = document.getElementById('tbody');
   if (allDefects.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="17" class="no-data">📭 لا توجد عيوب مطابقة</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="18" class="no-data">📭 لا توجد عيوب مطابقة</td></tr>`;
     renderParetoChart();
     return;
   }
@@ -571,6 +579,7 @@ function renderTable() {
       <td>${d.repair_status ? `<span class="repair-status-badge ${d.repair_status}">${dashboardRepairStatusText[d.repair_status]}</span>` : '-'}</td>
       <td>${d.technician_email ? d.technician_email.split('@')[0] : '-'}</td>
       <td style="font-size:11px;">${formatDate(d.created_at)}</td>
+      <td style="font-size:11px; white-space:nowrap;">${getShiftText(getShiftLabel(d.created_at))}</td>
       <td>${d.reviewed_by_email ? d.reviewed_by_email.split('@')[0] : '-'}</td>
       <td style="font-size:11px;">${d.reviewed_at ? formatDate(d.reviewed_at) : '-'}</td>
       <td style="max-width:180px; white-space:normal; font-size:11px;">${d.review_note || '-'}</td>
@@ -821,6 +830,7 @@ document.getElementById('resetFilter').addEventListener('click', () => {
   document.getElementById('filterLine').value = '';
   document.getElementById('filterDateFrom').value = '';
   document.getElementById('filterDateTo').value = '';
+  document.getElementById('filterShift').value = '';
   loadDefects();
 });
 
