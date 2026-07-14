@@ -155,6 +155,7 @@ tr.row-clickable { cursor: pointer; }
 
 <div class="filter-bar">
 <select id="filterStage"><option value="" data-i18n="all_stations">كل المحطات</option></select>
+<select id="filterFactory"><option value="">كل المصانع</option></select>
 <select id="filterStatus">
   <option value="" data-i18n="all_statuses">كل الحالات</option>
   <option value="pending" data-i18n="status_pending">قيد المراجعة</option>
@@ -299,6 +300,9 @@ tr.row-clickable { cursor: pointer; }
 <input type="text" id="newStageName" placeholder="مثال: محطة القص" />
 <label>رقم الخط (اختياري)</label>
 <input type="text" id="newStageLine" placeholder="مثال: 1" />
+<label>اسم المصنع (اختياري)</label>
+<input type="text" id="newStageFactory" placeholder="مثال: مصنع أ" list="factoryNamesList" />
+<datalist id="factoryNamesList"></datalist>
 <div class="checkbox-row">
   <input type="checkbox" id="newStageVisibleAll" checked />
   <label style="margin:0;">مرئية لكل المشرفين (غير مفعّل = تحدد مشرفين بعينهم)</label>
@@ -364,6 +368,7 @@ async function init() {
   }
 
   loadStagesFilter();
+  loadFactoryFilterOptions();
   loadDefects();
   openDefectFromUrlIfPresent();
   subscribeToLiveDefectUpdates();
@@ -418,6 +423,26 @@ async function loadStagesFilter() {
   });
 }
 
+async function loadFactoryFilterOptions() {
+  const { data } = await sbClient.from('stages').select('factory_name');
+  const names = [...new Set((data || []).map(s => s.factory_name).filter(Boolean))].sort();
+
+  const filterSelect = document.getElementById('filterFactory');
+  const currentValue = filterSelect.value;
+  filterSelect.innerHTML = '<option value="">كل المصانع</option>';
+  names.forEach(n => {
+    const o = document.createElement('option');
+    o.value = n; o.textContent = n;
+    filterSelect.appendChild(o);
+  });
+  filterSelect.value = currentValue;
+
+  const datalist = document.getElementById('factoryNamesList');
+  if (datalist) {
+    datalist.innerHTML = names.map(n => `<option value="${n}"></option>`).join('');
+  }
+}
+
 function openPhotoLightbox(url) {
   document.getElementById('lightboxImg').src = url;
   document.getElementById('photoLightbox').classList.add('open');
@@ -441,8 +466,9 @@ async function loadDefects() {
   const dateFrom = document.getElementById('filterDateFrom').value;
   const dateTo = document.getElementById('filterDateTo').value;
   const shiftFilter = document.getElementById('filterShift').value;
+  const factoryFilter = document.getElementById('filterFactory').value;
 
-  let query = sbClient.from('defects').select('*, stages(name, line_no)').order('created_at', { ascending: false });
+  let query = sbClient.from('defects').select('*, stages(name, line_no, factory_name)').order('created_at', { ascending: false });
   if (stageId) query = query.eq('stage_id', stageId);
   if (status) query = query.eq('status', status);
   if (search) query = query.ilike('serial_number', `%${search}%`);
@@ -459,6 +485,7 @@ async function loadDefects() {
     let results = data || [];
     if (lineSearch) results = results.filter(d => (d.stages?.line_no || '').toLowerCase().includes(lineSearch.toLowerCase()));
     if (shiftFilter) results = results.filter(d => getShiftLabel(d.created_at) === shiftFilter);
+    if (factoryFilter) results = results.filter(d => (d.stages?.factory_name || '') === factoryFilter);
     allDefects = results;
   } catch (err) {
     // مفيش نت - استخدم النسخة المحفوظة محليًا وفلترها بنفسنا بنفس معايير الفلتر
@@ -483,6 +510,7 @@ async function loadDefects() {
     if (dateFrom) cached = cached.filter(d => d.created_at >= dateFrom + 'T00:00:00');
     if (dateTo) cached = cached.filter(d => d.created_at <= dateTo + 'T23:59:59');
     if (shiftFilter) cached = cached.filter(d => getShiftLabel(d.created_at) === shiftFilter);
+    if (factoryFilter) cached = cached.filter(d => (d.stages?.factory_name || '') === factoryFilter);
     allDefects = cached;
   }
 
@@ -831,6 +859,7 @@ document.getElementById('resetFilter').addEventListener('click', () => {
   document.getElementById('filterDateFrom').value = '';
   document.getElementById('filterDateTo').value = '';
   document.getElementById('filterShift').value = '';
+  document.getElementById('filterFactory').value = '';
   loadDefects();
 });
 
@@ -1068,7 +1097,7 @@ async function openDefectFromUrlIfPresent() {
 
   const { data, error } = await sbClient
     .from('defects')
-    .select('*, stages(name, line_no)')
+    .select('*, stages(name, line_no, factory_name)')
     .eq('id', defectId)
     .maybeSingle();
 
@@ -1097,7 +1126,7 @@ document.getElementById('bulkDeleteStationsBtn').addEventListener('click', async
   const { error } = await sbClient.from('stages').delete().in('id', ids);
   if (error) { alert('❌ فشل الحذف: ' + error.message); return; }
   loadStationsList();
-  loadStagesFilter();
+  loadStagesFilter(); loadFactoryFilterOptions();
 });
 
 document.getElementById('newStageVisibleAll').addEventListener('change', (e) => {
@@ -1137,6 +1166,7 @@ async function loadTechniciansList() {
 document.getElementById('addStageBtn').addEventListener('click', async () => {
   const name = document.getElementById('newStageName').value.trim();
   const line = document.getElementById('newStageLine').value.trim() || null;
+  const factoryName = document.getElementById('newStageFactory').value.trim() || null;
   const visibleAll = document.getElementById('newStageVisibleAll').checked;
   const techOpenAll = document.getElementById('newStageTechOpenAll').checked;
 
@@ -1144,7 +1174,7 @@ document.getElementById('addStageBtn').addEventListener('click', async () => {
 
   try {
     const { data: stage, error } = await sbClient.from('stages').insert([{
-      name, line_no: line, visible_to_all: visibleAll, technicians_open_to_all: techOpenAll, created_by: currentUser.id
+      name, line_no: line, factory_name: factoryName, visible_to_all: visibleAll, technicians_open_to_all: techOpenAll, created_by: currentUser.id
     }]).select().single();
     if (error) throw error;
 
@@ -1166,13 +1196,14 @@ document.getElementById('addStageBtn').addEventListener('click', async () => {
 
     document.getElementById('newStageName').value = '';
     document.getElementById('newStageLine').value = '';
+    document.getElementById('newStageFactory').value = '';
     document.getElementById('newStageVisibleAll').checked = true;
     document.getElementById('newStageSupervisorsWrap').style.display = 'none';
     document.getElementById('newStageTechOpenAll').checked = true;
     document.getElementById('newStageTechWrap').style.display = 'none';
 
     loadStationsList();
-    loadStagesFilter();
+    loadStagesFilter(); loadFactoryFilterOptions();
     alert('✅ تمت إضافة المحطة بنجاح');
   } catch (err) {
     alert('❌ فشل الإضافة: ' + err.message);
@@ -1207,12 +1238,17 @@ async function loadStationsList() {
     div.className = 'station-item';
     div.innerHTML = `
       <div class="s-title">
-        <span><input type="checkbox" class="station-checkbox" data-station-id="${s.id}" />🏭 ${s.name} ${s.line_no ? '(خط ' + s.line_no + ')' : ''}</span>
+        <span><input type="checkbox" class="station-checkbox" data-station-id="${s.id}" />🏭 ${s.name} ${s.line_no ? '(خط ' + s.line_no + ')' : ''} ${s.factory_name ? `<span style="color:#a78bfa; font-size:11px;">[${s.factory_name}]</span>` : ''}</span>
         <button class="small-btn manage-station-btn" data-id="${s.id}">إدارة</button>
       </div>
       <div class="s-meta">${s.visible_to_all ? '👁 مرئية لكل المشرفين' : '🔒 مشرفين محددين: ' + (stageSupervisors.map(a => a.profiles?.email).join(', ') || 'لا يوجد')}</div>
       <div class="s-meta">${s.technicians_open_to_all ? '👷 مفتوحة لكل الفنيين' : '🔒 فنيين محددين: ' + (stageTechAssignments.map(a => a.profiles?.email).join(', ') || 'لا يوجد')}</div>
       <div class="station-detail" id="detail-${s.id}">
+        <label style="color:#94a3b8;font-size:12px; display:block; margin-bottom:6px;">🏢 اسم المصنع:</label>
+        <div style="display:flex; gap:6px; margin-bottom:14px;">
+          <input type="text" class="edit-factory-input" data-station-id="${s.id}" value="${s.factory_name || ''}" placeholder="مثال: مصنع أ" style="flex:1; padding:8px 12px; border:none; border-radius:6px; background:#334155; color:#f1f5f9; font-size:12px;" />
+          <button class="small-btn save-factory-btn" data-station-id="${s.id}">💾 حفظ</button>
+        </div>
         <label style="color:#94a3b8;font-size:12px; display:block; margin-bottom:6px;">👨‍💼 تعديل المشرفين المسؤولين:</label>
         <div class="checkbox-row">
           <input type="checkbox" class="edit-visible-all-cb" data-station-id="${s.id}" ${s.visible_to_all ? 'checked' : ''} />
@@ -1297,6 +1333,19 @@ async function loadStationsList() {
   });
 
   // ============ تعديل صلاحيات المحطة (مشرفين/فنيين) ============
+  container.querySelectorAll('.save-factory-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const stationId = btn.dataset.stationId;
+      const input = container.querySelector(`.edit-factory-input[data-station-id="${stationId}"]`);
+      const factoryName = input.value.trim() || null;
+      const { error } = await sbClient.from('stages').update({ factory_name: factoryName }).eq('id', stationId);
+      if (error) { alert('❌ ' + error.message); return; }
+      alert('✅ تم حفظ اسم المصنع');
+      loadStationsList();
+      loadFactoryFilterOptions();
+    });
+  });
+
   container.querySelectorAll('.edit-visible-all-cb').forEach(cb => {
     cb.addEventListener('click', (e) => e.stopPropagation());
     cb.addEventListener('change', async () => {
