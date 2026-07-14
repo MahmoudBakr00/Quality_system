@@ -713,6 +713,16 @@ function makeSelectSearchable(selectId) {
   };
 }
 
+// يحدد الوردية (نهار/ليل) بناءً على وقت تسجيل العيب
+// وردية النهار: من 8 صباحًا لـ 8 مساءً | وردية الليل: من 8 مساءً لـ 8 صباحًا
+function getShiftLabel(createdAt) {
+  const hour = new Date(createdAt).getHours();
+  return (hour >= 8 && hour < 20) ? 'day' : 'night';
+}
+function getShiftText(shift) {
+  return shift === 'day' ? '☀️ نهار' : '🌙 ليل';
+}
+
 function getRememberedEmail() {
   return localStorage.getItem(REMEMBERED_EMAIL_KEY) || '';
 }
