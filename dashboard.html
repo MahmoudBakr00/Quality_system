@@ -145,6 +145,7 @@ tr.row-clickable { cursor: pointer; }
 <div class="nav-links">
 <a href="home.html" data-i18n="home">🏠 الرئيسية</a>
 <button class="link-btn" id="stationsBtn" style="display:none;" data-i18n="manage_stations">🏭 إدارة المحطات</button>
+<button class="link-btn" id="modelMappingBtn" style="display:none;">🔗 ربط الموديلات</button>
 <a href="admin-users.html" id="usersLink" style="display:none;" data-i18n="manage_users">👥 إدارة المستخدمين</a>
 <div id="notifBellWrap"></div>
 <div id="pushToggleWrap"></div>
@@ -208,13 +209,39 @@ tr.row-clickable { cursor: pointer; }
 </div>
 
 <div class="table-wrapper">
-<table>
-<thead><tr>
+<div style="display:flex; justify-content:flex-end; margin-bottom:8px;">
+  <button id="columnSettingsBtn" style="background:#334155; color:#f1f5f9; border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-size:13px; font-weight:bold;">⚙️ الأعمدة</button>
+</div>
+<table id="defectsTable">
+<colgroup id="defectsColgroup"></colgroup>
+<thead><tr id="headerRow">
   <th id="checkboxHeaderCell" style="display:none;"><input type="checkbox" id="selectAllCheckbox" /></th>
-  <th data-i18n="col_serial">السيريال</th><th>كود العيب</th><th data-i18n="col_job_order">الجوب أوردر</th><th data-i18n="col_station">المحطة</th><th>خط الإنتاج</th><th data-i18n="col_defect_type">نوع العيب</th><th>وصف العيب</th><th>الصورة</th><th data-i18n="col_status">الحالة</th><th>حالة الإصلاح</th><th data-i18n="col_technician">الفني</th><th data-i18n="col_date">التاريخ</th><th>الوردية</th><th>المُراجِع</th><th>تاريخ الإغلاق</th><th>ملاحظة المراجعة</th><th></th>
 </tr></thead>
-<tbody id="tbody"><tr><td colspan="18" class="loading">⏳ جاري التحميل...</td></tr></tbody>
+<tbody id="tbody"><tr><td colspan="20" class="loading">⏳ جاري التحميل...</td></tr></tbody>
 </table>
+</div>
+
+<!-- لوحة إعدادات الأعمدة (إظهار/إخفاء) -->
+<div class="modal-overlay" id="columnSettingsModal">
+<div class="modal-box" style="max-width:400px;">
+<h3>⚙️ إظهار/إخفاء الأعمدة</h3>
+<div id="columnCheckboxList" style="max-height:400px; overflow-y:auto; margin:14px 0;"></div>
+<button class="modal-close" id="columnSettingsClose">إغلاق</button>
+</div>
+</div>
+
+<!-- لوحة فلتر عمود واحد (Excel-style) -->
+<div class="modal-overlay" id="columnFilterModal">
+<div class="modal-box" style="max-width:320px;">
+<h3 id="columnFilterTitle">فلترة العمود</h3>
+<div style="display:flex; gap:8px; margin-bottom:10px;">
+  <button id="colFilterSelectAll" class="small-btn">تحديد الكل</button>
+  <button id="colFilterClearAll" class="small-btn">إلغاء الكل</button>
+</div>
+<div id="columnFilterValuesList" style="max-height:280px; overflow-y:auto; margin-bottom:14px;"></div>
+<button id="colFilterApplyBtn" style="width:100%; padding:10px; background:#3b82f6; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">✅ تطبيق</button>
+<button class="modal-close" id="columnFilterClose">إغلاق</button>
+</div>
 </div>
 </div>
 
@@ -330,11 +357,46 @@ tr.row-clickable { cursor: pointer; }
 </div>
 </div>
 
+<!-- مودال ربط الموديلات (الجوب أوردر ↔ البيز موديل ↔ الماركت موديل) -->
+<div class="modal-overlay" id="modelMappingModal">
+<div class="modal-box" style="max-width:650px;">
+<h3>🔗 ربط الموديلات (الجوب أوردر ↔ البيز موديل ↔ الماركت موديل)</h3>
+
+<div class="station-form">
+<label>البيز موديل</label>
+<input type="text" id="newMappingBaseModel" placeholder="مثال: MDRF" />
+<label>الماركت موديل</label>
+<input type="text" id="newMappingMarketModel" placeholder="مثال: MDRF-500W" />
+<label>الجوب أوردر</label>
+<input type="text" id="newMappingJobOrder" placeholder="مثال: 30054080" />
+<button class="small-btn" style="margin-top:10px; width:100%; padding:10px;" id="addMappingBtn">➕ إضافة الربط</button>
+</div>
+
+<div class="excel-upload-row" style="margin-top:14px;">
+  <input type="file" accept=".xlsx,.xls,.csv" id="mappingExcelInput" />
+  <button class="excel-upload-btn" id="mappingExcelUploadBtn">📊 رفع إكسيل (A=بيز موديل, B=ماركت موديل, C=جوب أوردر)</button>
+</div>
+
+<div class="bulk-delete-row">
+  <button class="bulk-delete-btn" id="bulkDeleteMappingsBtn">🗑 حذف المحدد</button>
+</div>
+<div id="mappingsList" style="max-height:300px; overflow-y:auto;"><div class="loading">⏳ جاري التحميل...</div></div>
+<button class="modal-close" id="modelMappingClose">إغلاق</button>
+</div>
+</div>
+
 <script src="shared.js"></script>
 <script>
 let currentUser = null;
 let currentRole = null;
 let isFullAccess = false; // أدمن أو مشرف عام
+let modelMappingCache = {}; // كاش لربط الجوب أوردر بالبيز موديل والماركت موديل
+
+async function loadModelMappingCache() {
+  const { data } = await sbClient.from('model_mapping').select('*');
+  modelMappingCache = {};
+  (data || []).forEach(m => { modelMappingCache[m.job_order] = m; });
+}
 let allDefects = [];
 let supervisorAllowedStageIds = null; // بس للمشرف: المحطات اللي يقدر يعتمد/يرفض عليها
 let allSupervisors = [];
@@ -351,8 +413,11 @@ async function init() {
   renderNotificationBell('notifBellWrap', auth.user.id);
   renderPushToggleButton('pushToggleWrap', auth.user.id);
 
+  renderTableHeader();
+
   if (isFullAccess) {
     document.getElementById('stationsBtn').style.display = 'inline-block';
+    document.getElementById('modelMappingBtn').style.display = 'inline-block';
     document.getElementById('usersLink').style.display = 'inline-block';
     document.getElementById('deleteSelectedBtn').style.display = 'inline-block';
   }
@@ -369,6 +434,7 @@ async function init() {
 
   loadStagesFilter();
   loadFactoryFilterOptions();
+  loadModelMappingCache();
   loadDefects();
   openDefectFromUrlIfPresent();
   subscribeToLiveDefectUpdates();
@@ -454,7 +520,7 @@ document.getElementById('photoLightboxClose').addEventListener('click', () => {
 // ============ تحميل العيوب ============
 async function loadDefects() {
   const tbody = document.getElementById('tbody');
-  tbody.innerHTML = `<tr><td colspan="18" class="loading">⏳ جاري التحميل...</td></tr>`;
+  tbody.innerHTML = `<tr><td colspan="20" class="loading">⏳ جاري التحميل...</td></tr>`;
 
   const stageId = document.getElementById('filterStage').value;
   const status = document.getElementById('filterStatus').value;
@@ -574,16 +640,210 @@ async function renderSerialHistoryPanel(searchTerm) {
   `).join('');
 }
 
+// =========================================================
+// نظام إعدادات الأعمدة: فلترة شبيهة بالإكسيل + إظهار/إخفاء + تغيير عرض
+// =========================================================
+const COLUMNS = [
+  { key: 'checkbox', label: '', filterable: false, alwaysVisible: true, width: 40 },
+  { key: 'serial', label: 'السيريال', getValue: d => d.serial_number || '-', width: 140 },
+  { key: 'defect_code', label: 'كود العيب', getValue: d => d.defect_code || '-', width: 150 },
+  { key: 'job_order', label: 'الجوب أوردر', getValue: d => d.job_order || '-', width: 110 },
+  { key: 'base_model', label: 'البيز موديل', getValue: d => (modelMappingCache[d.job_order] && modelMappingCache[d.job_order].base_model) || '-', width: 110 },
+  { key: 'market_model', label: 'الماركت موديل', getValue: d => (modelMappingCache[d.job_order] && modelMappingCache[d.job_order].market_model) || '-', width: 130 },
+  { key: 'station', label: 'المحطة', getValue: d => d.stages ? d.stages.name : '-', width: 110 },
+  { key: 'line', label: 'خط الإنتاج', getValue: d => (d.stages && d.stages.line_no) ? String(d.stages.line_no) : '-', width: 90 },
+  { key: 'defect_type', label: 'نوع العيب', getValue: d => d.defect_type_name || '-', width: 150 },
+  { key: 'description', label: 'وصف العيب', getValue: d => d.description || '-', filterable: false, width: 180 },
+  { key: 'photo', label: 'الصورة', filterable: false, width: 70 },
+  { key: 'status', label: 'الحالة', getValue: d => statusText[d.status] || d.status, width: 100 },
+  { key: 'repair_status', label: 'حالة الإصلاح', getValue: d => d.repair_status ? dashboardRepairStatusText[d.repair_status] : '-', width: 120 },
+  { key: 'technician', label: 'الفني', getValue: d => d.technician_email ? d.technician_email.split('@')[0] : '-', width: 110 },
+  { key: 'date', label: 'التاريخ', filterable: false, width: 130 },
+  { key: 'shift', label: 'الوردية', getValue: d => getShiftText(getShiftLabel(d.created_at)), width: 90 },
+  { key: 'reviewer', label: 'المُراجِع', getValue: d => d.reviewed_by_email ? d.reviewed_by_email.split('@')[0] : '-', width: 110 },
+  { key: 'closed_at', label: 'تاريخ الإغلاق', filterable: false, width: 130 },
+  { key: 'review_note', label: 'ملاحظة المراجعة', getValue: d => d.review_note || '-', filterable: false, width: 160 },
+  { key: 'actions', label: '', filterable: false, width: 160 },
+];
+
+let columnFilters = {}; // key -> Set من القيم المسموح عرضها (لو مش موجودة = كل القيم ظاهرة)
+let hiddenColumns = new Set(JSON.parse(localStorage.getItem('dashboard_hidden_columns') || '[]'));
+
+function saveHiddenColumns() {
+  localStorage.setItem('dashboard_hidden_columns', JSON.stringify([...hiddenColumns]));
+}
+
+function renderTableHeader() {
+  const headerRow = document.getElementById('headerRow');
+  const colgroup = document.getElementById('defectsColgroup');
+  // نمسح كل حاجة عدا خانة التحديد الأولى (بتتحكم فيها دالة تانية بالفعل)
+  headerRow.innerHTML = '<th id="checkboxHeaderCell" style="display:none;"><input type="checkbox" id="selectAllCheckbox" /></th>';
+  colgroup.innerHTML = '';
+
+  COLUMNS.forEach((col, idx) => {
+    if (col.key === 'checkbox') {
+      colgroup.innerHTML += `<col style="width:${col.width}px;">`;
+      return;
+    }
+    const th = document.createElement('th');
+    th.dataset.colKey = col.key;
+    th.style.position = 'relative';
+    th.style.whiteSpace = 'nowrap';
+    th.innerHTML = `
+      <span>${col.label}</span>
+      ${col.filterable !== false ? `<button class="col-filter-btn" data-col-key="${col.key}" title="فلترة" style="background:none; border:none; color:#93c5fd; cursor:pointer; font-size:11px; margin-right:4px;">▼</button>` : ''}
+      <span class="col-resize-handle" data-col-key="${col.key}" style="position:absolute; top:0; left:0; width:6px; height:100%; cursor:col-resize;"></span>
+    `;
+    headerRow.appendChild(th);
+    colgroup.innerHTML += `<col style="width:${col.width}px;">`;
+  });
+
+  // إعادة ربط الأحداث
+  document.getElementById('selectAllCheckbox')?.addEventListener('change', (e) => {
+    document.querySelectorAll('.row-checkbox').forEach(cb => { cb.checked = e.target.checked; });
+  });
+
+  headerRow.querySelectorAll('.col-filter-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openColumnFilterModal(btn.dataset.colKey);
+    });
+  });
+
+  headerRow.querySelectorAll('.col-resize-handle').forEach(handle => {
+    handle.addEventListener('mousedown', (e) => startColumnResize(e, handle.dataset.colKey));
+  });
+
+  applyColumnVisibility();
+}
+
+function applyColumnVisibility() {
+  const table = document.getElementById('defectsTable');
+  table.querySelectorAll('style[data-col-hide]').forEach(s => s.remove());
+  if (hiddenColumns.size === 0) return;
+
+  let css = '';
+  COLUMNS.forEach((col, idx) => {
+    if (hiddenColumns.has(col.key) && col.key !== 'checkbox') {
+      const nth = idx + 1; // بما إن الأعمدة كلها ظاهرة في نفس الترتيب في الجدول والـ colgroup
+      css += `#defectsTable th:nth-child(${nth}), #defectsTable td:nth-child(${nth}) { display: none; }\n`;
+    }
+  });
+  const style = document.createElement('style');
+  style.dataset.colHide = '1';
+  style.textContent = css;
+  table.appendChild(style);
+}
+
+function startColumnResize(e, colKey) {
+  e.preventDefault();
+  const idx = COLUMNS.findIndex(c => c.key === colKey);
+  const colEl = document.getElementById('defectsColgroup').children[idx];
+  const startX = e.clientX;
+  const startWidth = colEl.offsetWidth || parseInt(colEl.style.width) || 100;
+
+  function onMouseMove(ev) {
+    const delta = ev.clientX - startX; // RTL: تحريك الماوس يمين بيكبّر عادةً حسب الاتجاه
+    const newWidth = Math.max(50, startWidth - delta);
+    colEl.style.width = newWidth + 'px';
+  }
+  function onMouseUp() {
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mouseup', onMouseUp);
+  }
+  document.addEventListener('mousemove', onMouseMove);
+  document.addEventListener('mouseup', onMouseUp);
+}
+
+// ============ لوحة إظهار/إخفاء الأعمدة ============
+document.getElementById('columnSettingsBtn').addEventListener('click', () => {
+  const list = document.getElementById('columnCheckboxList');
+  list.innerHTML = COLUMNS.filter(c => !c.alwaysVisible).map(col => `
+    <label style="display:flex; align-items:center; gap:8px; padding:6px 0; font-size:13px; color:#f1f5f9; cursor:pointer;">
+      <input type="checkbox" class="col-visibility-cb" data-col-key="${col.key}" ${hiddenColumns.has(col.key) ? '' : 'checked'} />
+      ${col.label || '(بدون عنوان)'}
+    </label>
+  `).join('');
+  document.getElementById('columnSettingsModal').classList.add('open');
+
+  list.querySelectorAll('.col-visibility-cb').forEach(cb => {
+    cb.addEventListener('change', () => {
+      if (cb.checked) hiddenColumns.delete(cb.dataset.colKey);
+      else hiddenColumns.add(cb.dataset.colKey);
+      saveHiddenColumns();
+      applyColumnVisibility();
+    });
+  });
+});
+document.getElementById('columnSettingsClose').addEventListener('click', () => {
+  document.getElementById('columnSettingsModal').classList.remove('open');
+});
+
+// ============ لوحة فلتر عمود واحد (Excel-style) ============
+let currentFilterColKey = null;
+function openColumnFilterModal(colKey) {
+  currentFilterColKey = colKey;
+  const col = COLUMNS.find(c => c.key === colKey);
+  document.getElementById('columnFilterTitle').textContent = 'فلترة: ' + col.label;
+
+  const uniqueValues = [...new Set(allDefects.map(d => col.getValue(d)))].sort();
+  const selected = columnFilters[colKey] || new Set(uniqueValues);
+
+  const list = document.getElementById('columnFilterValuesList');
+  list.innerHTML = uniqueValues.map(v => `
+    <label style="display:flex; align-items:center; gap:8px; padding:5px 0; font-size:13px; color:#f1f5f9; cursor:pointer;">
+      <input type="checkbox" class="col-filter-value-cb" value="${v.replace(/"/g, '&quot;')}" ${selected.has(v) ? 'checked' : ''} />
+      ${v}
+    </label>
+  `).join('') || '<div style="color:#64748b; font-size:12px;">لا توجد قيم</div>';
+
+  document.getElementById('columnFilterModal').classList.add('open');
+}
+document.getElementById('columnFilterClose').addEventListener('click', () => {
+  document.getElementById('columnFilterModal').classList.remove('open');
+});
+document.getElementById('colFilterSelectAll').addEventListener('click', () => {
+  document.querySelectorAll('.col-filter-value-cb').forEach(cb => { cb.checked = true; });
+});
+document.getElementById('colFilterClearAll').addEventListener('click', () => {
+  document.querySelectorAll('.col-filter-value-cb').forEach(cb => { cb.checked = false; });
+});
+document.getElementById('colFilterApplyBtn').addEventListener('click', () => {
+  const checked = Array.from(document.querySelectorAll('.col-filter-value-cb:checked')).map(cb => cb.value);
+  const col = COLUMNS.find(c => c.key === currentFilterColKey);
+  const uniqueValues = [...new Set(allDefects.map(d => col.getValue(d)))];
+
+  if (checked.length === uniqueValues.length) {
+    delete columnFilters[currentFilterColKey]; // كله متحدد = من غير فلتر خالص
+  } else {
+    columnFilters[currentFilterColKey] = new Set(checked);
+  }
+  document.getElementById('columnFilterModal').classList.remove('open');
+  renderTable();
+});
+
+function getDisplayedDefects() {
+  let list = allDefects;
+  Object.keys(columnFilters).forEach(colKey => {
+    const col = COLUMNS.find(c => c.key === colKey);
+    if (!col) return;
+    const allowed = columnFilters[colKey];
+    list = list.filter(d => allowed.has(col.getValue(d)));
+  });
+  return list;
+}
+
 function renderTable() {
   const tbody = document.getElementById('tbody');
-  if (allDefects.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="18" class="no-data">📭 لا توجد عيوب مطابقة</td></tr>`;
+  const displayedDefects = getDisplayedDefects();
+  if (displayedDefects.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="20" class="no-data">📭 لا توجد عيوب مطابقة</td></tr>`;
     renderParetoChart();
     return;
   }
 
   tbody.innerHTML = '';
-  allDefects.forEach(d => {
+  displayedDefects.forEach(d => {
     const tr = document.createElement('tr');
     tr.className = 'row-clickable';
     const canReview = isFullAccess || currentRole === 'supervisor';
@@ -598,6 +858,8 @@ function renderTable() {
       <td>${d.serial_number}</td>
       <td style="font-weight:bold; color:#93c5fd;">${d.defect_code || '-'}</td>
       <td>${d.job_order || '-'}</td>
+      <td>${modelMappingCache[d.job_order]?.base_model || '-'}</td>
+      <td>${modelMappingCache[d.job_order]?.market_model || '-'}</td>
       <td>${d.stages ? d.stages.name : '-'}</td>
       <td>${d.stages && d.stages.line_no ? d.stages.line_no : '-'}</td>
       <td>${d.defect_type_name || '-'}</td>
@@ -879,9 +1141,7 @@ document.getElementById('exportBtn').addEventListener('click', () => {
 });
 
 // ============ تحديد الكل وحذف ============
-document.getElementById('selectAllCheckbox')?.addEventListener('change', (e) => {
-  document.querySelectorAll('.row-checkbox').forEach(cb => cb.checked = e.target.checked);
-});
+// (معالج "تحديد الكل" بقى بينضاف تلقائيًا جوه renderTableHeader بعد كل إعادة بناء لرأس الجدول)
 
 document.getElementById('deleteSelectedBtn').addEventListener('click', async () => {
   const selected = Array.from(document.querySelectorAll('.row-checkbox:checked')).map(cb => cb.dataset.id);
@@ -1117,6 +1377,113 @@ document.getElementById('stationsBtn').addEventListener('click', async () => {
   loadStationsList();
 });
 document.getElementById('stationsClose').addEventListener('click', () => stationsModal.classList.remove('open'));
+
+// ============ ربط الموديلات (مدير نظام / مشرف عام فقط) ============
+const modelMappingModal = document.getElementById('modelMappingModal');
+document.getElementById('modelMappingBtn').addEventListener('click', () => {
+  modelMappingModal.classList.add('open');
+  loadMappingsList();
+});
+document.getElementById('modelMappingClose').addEventListener('click', () => modelMappingModal.classList.remove('open'));
+
+async function loadMappingsList() {
+  const container = document.getElementById('mappingsList');
+  container.innerHTML = '<div class="loading">⏳ جاري التحميل...</div>';
+
+  const { data, error } = await sbClient.from('model_mapping').select('*').order('job_order');
+  if (error) {
+    container.innerHTML = '<div style="color:#f87171; font-size:12px;">❌ فشل التحميل</div>';
+    return;
+  }
+
+  if (!data || data.length === 0) {
+    container.innerHTML = '<div style="color:#64748b; font-size:12px; text-align:center; padding:16px;">لا يوجد ربط مضاف بعد</div>';
+    return;
+  }
+
+  container.innerHTML = data.map(m => `
+    <div style="display:flex; align-items:center; gap:8px; font-size:12px; color:#cbd5e1; padding:6px 0; border-bottom:1px solid #334155;">
+      <input type="checkbox" class="mapping-checkbox" data-mapping-id="${m.id}" />
+      <span style="font-weight:bold; color:#93c5fd;">${m.job_order}</span>
+      <span style="color:#64748b;">←</span>
+      <span>${m.base_model || '-'}</span>
+      <span style="color:#64748b;">/</span>
+      <span>${m.market_model || '-'}</span>
+    </div>
+  `).join('');
+}
+
+document.getElementById('addMappingBtn').addEventListener('click', async () => {
+  const baseModel = document.getElementById('newMappingBaseModel').value.trim() || null;
+  const marketModel = document.getElementById('newMappingMarketModel').value.trim() || null;
+  const jobOrder = document.getElementById('newMappingJobOrder').value.trim();
+
+  if (!jobOrder) { alert('⚠️ اكتب الجوب أوردر'); return; }
+
+  const { error } = await sbClient.from('model_mapping').upsert(
+    [{ job_order: jobOrder, base_model: baseModel, market_model: marketModel }],
+    { onConflict: 'job_order' }
+  );
+  if (error) { alert('❌ ' + error.message); return; }
+
+  document.getElementById('newMappingBaseModel').value = '';
+  document.getElementById('newMappingMarketModel').value = '';
+  document.getElementById('newMappingJobOrder').value = '';
+  loadMappingsList();
+  loadModelMappingCache();
+});
+
+document.getElementById('bulkDeleteMappingsBtn').addEventListener('click', async () => {
+  const ids = Array.from(document.querySelectorAll('.mapping-checkbox:checked')).map(cb => cb.dataset.mappingId);
+  if (ids.length === 0) { alert('⚠️ اختر عنصر واحد على الأقل'); return; }
+  if (!confirm(`هل أنت متأكد من حذف ${ids.length} عنصر؟`)) return;
+
+  const { error } = await sbClient.from('model_mapping').delete().in('id', ids);
+  if (error) { alert('❌ فشل الحذف: ' + error.message); return; }
+  loadMappingsList();
+  loadModelMappingCache();
+});
+
+document.getElementById('mappingExcelUploadBtn').addEventListener('click', async () => {
+  const file = document.getElementById('mappingExcelInput').files[0];
+  if (!file) { alert('⚠️ اختر ملف إكسيل أولاً'); return; }
+
+  try {
+    const data = await file.arrayBuffer();
+    const workbook = XLSX.read(data, { type: 'array' });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+    const mappings = rows
+      .map(r => ({
+        baseModel: (r && r[0] !== undefined && r[0] !== null) ? String(r[0]).trim() : '',
+        marketModel: (r && r[1] !== undefined && r[1] !== null) ? String(r[1]).trim() : '',
+        jobOrder: (r && r[2] !== undefined && r[2] !== null) ? String(r[2]).trim() : '',
+      }))
+      .filter(m => m.jobOrder !== '');
+
+    if (mappings.length === 0) {
+      alert('⚠️ لم يتم العثور على بيانات صالحة (عمود A=بيز موديل, B=ماركت موديل, C=جوب أوردر)');
+      return;
+    }
+
+    const rowsToInsert = mappings.map(m => ({
+      job_order: m.jobOrder,
+      base_model: m.baseModel || null,
+      market_model: m.marketModel || null,
+    }));
+
+    const { error } = await sbClient.from('model_mapping').upsert(rowsToInsert, { onConflict: 'job_order' });
+    if (error) throw error;
+
+    alert(`✅ تمت إضافة/تحديث ${mappings.length} ربط بنجاح`);
+    loadMappingsList();
+    loadModelMappingCache();
+  } catch (err) {
+    alert('❌ فشل قراءة الملف: ' + err.message);
+    console.error(err);
+  }
+});
 
 document.getElementById('bulkDeleteStationsBtn').addEventListener('click', async () => {
   const checkboxes = document.querySelectorAll('.station-checkbox:checked');
