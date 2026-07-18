@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<link rel="manifest" href="manifest.json" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="متابعة العيوب" />
+<link rel="apple-touch-icon" href="icon-180.png" />
+<meta name="theme-color" content="#3b82f6" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>فحص المطابقة - نظام تسجيل العيوب</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+body { background: #0f172a; padding: 20px; color: #f1f5f9; }
+.container { max-width: 550px; margin: 0 auto; }
+.sub-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; background: #1e293b; padding: 14px 20px; border-radius: 12px; }
+.back-link { color: #93c5fd; text-decoration: none; font-weight: 600; font-size: 14px; }
+.view { background: #1e293b; border-radius: 16px; padding: 28px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); text-align: center; }
+.station-name { color: #60a5fa; font-size: 20px; font-weight: bold; margin-bottom: 8px; }
+.progress-text { color: #94a3b8; font-size: 14px; margin-bottom: 20px; }
+.condition-name { color: #fbbf24; font-size: 22px; font-weight: bold; margin-bottom: 16px; }
+.scan-row { display: flex; gap: 10px; margin-bottom: 10px; }
+.scan-row input { flex: 1; padding: 16px; border: none; border-radius: 10px; background: #334155; color: #f1f5f9; font-size: 18px; text-align: center; }
+.scan-row input:focus { outline: 3px solid #3b82f6; }
+.scan-btn { background: #8b5cf6; color: white; border: none; padding: 0 18px; border-radius: 10px; cursor: pointer; font-weight: bold; }
+.progress-dots { display: flex; justify-content: center; gap: 8px; margin-top: 20px; }
+.progress-dot { width: 12px; height: 12px; border-radius: 50%; background: #334155; }
+.progress-dot.done { background: #22c55e; }
+.progress-dot.current { background: #3b82f6; }
+
+#scannerModal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 100; align-items: center; justify-content: center; }
+#scannerModal.open { display: flex; }
+.scanner-box { background: #1e293b; border-radius: 14px; padding: 20px; width: 90%; max-width: 400px; }
+#scannerContainer { width: 100%; border-radius: 10px; overflow: hidden; }
+.scanner-close { width: 100%; margin-top: 14px; padding: 10px; background: #64748b; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
+
+.result-overlay { display: none; position: fixed; inset: 0; z-index: 200; align-items: center; justify-content: center; flex-direction: column; text-align: center; padding: 20px; }
+.result-overlay.show { display: flex; }
+.result-overlay.ok { background: rgba(34,197,94,0.97); }
+.result-overlay.ng { background: rgba(239,68,68,0.97); }
+.result-overlay.undefined { background: rgba(251,191,36,0.97); }
+.result-overlay .result-icon { font-size: 5rem; margin-bottom: 16px; }
+.result-overlay .result-text { font-size: 2.5rem; font-weight: bold; color: white; margin-bottom: 20px; }
+.result-overlay .result-detail { color: white; font-size: 14px; margin-bottom: 24px; direction: ltr; max-width: 90%; }
+.result-overlay button { background: white; color: #333; border: none; padding: 14px 40px; border-radius: 50px; font-size: 18px; font-weight: bold; cursor: pointer; }
+
+.no-station-msg { text-align: center; color: #94a3b8; padding: 40px; }
+</style>
+</head>
+<body>
+<div class="container">
+<div class="sub-header">
+<a href="home.html" class="back-link">⬅ الرئيسية</a>
+<div style="display:flex; align-items:center; gap:10px;">
+<div id="notifBellWrap"></div>
+<span id="userEmail" style="color:#94a3b8; font-size:13px;"></span>
+</div>
+</div>
+
+<div id="mainContent"></div>
+</div>
+
+<div id="scannerModal">
+<div class="scanner-box">
+<h3 style="color:#60a5fa; margin-bottom:14px; text-align:center;" id="scannerTitle">📷 وجّه الكاميرا</h3>
+<div id="scannerContainer"></div>
+<button class="scanner-close" id="closeScannerBtn">إغلاق</button>
+</div>
+</div>
+
+<div class="result-overlay" id="resultOverlay">
+<div class="result-icon" id="resultIcon">✔</div>
+<div class="result-text" id="resultText">OK</div>
+<div class="result-detail" id="resultDetail"></div>
+<button id="resultCloseBtn">موافق</button>
+</div>
+
+<script src="shared.js"></script>
+<script>
+let currentUser = null;
+let currentScanner = null;
+let myStations = [];
+let activeStation = null;
+let activeConditions = [];
+let currentConditionIndex = 0;
+let scannedValues = {};
+let rawScannedValues = {};
+
+async function init() {
+  const auth = await requireAuth();
+  if (!auth) return;
+  currentUser = auth.user;
+  document.getElementById('userEmail').textContent = auth.user.email;
+  renderNotificationBell('notifBellWrap', auth.user.id);
+
+  await loadMyStations();
+}
+init();
+
+async function loadMyStations() {
+  const { data: assignments } = await sbClient
+    .from('comparison_station_users')
+    .select('station_id, comparison_stations(id, name)')
+    .eq('user_id', currentUser.id);
+
+  myStations = (assignments || []).map(a => a.comparison_stations).filter(Boolean);
+
+  const content = document.getElementById('mainContent');
+  if (myStations.length === 0) {
+    content.innerHTML = '<div class="view"><div class="no-station-msg">📭 معندكش أي محطة مقارنة مخصصة ليك. اطلب من الأدمن يضيفك لمحطة من داشبورد سجل المقارنات.</div></div>';
+    return;
+  }
+
+  if (myStations.length === 1) {
+    await startStation(myStations[0]);
+  } else {
+    content.innerHTML = `
+      <div class="view">
+        <div class="station-name">اختار المحطة</div>
+        <select id="stationPicker" style="width:100%; padding:14px; border:none; border-radius:10px; background:#334155; color:#f1f5f9; font-size:16px; margin-top:14px;">
+          <option value="">-- اختر --</option>
+          ${myStations.map(s => `<option value="${s.id}">${s.name}</option>`).join('')}
+        </select>
+      </div>
+    `;
+    document.getElementById('stationPicker').addEventListener('change', (e) => {
+      const station = myStations.find(s => s.id === e.target.value);
+      if (station) startStation(station);
+    });
+  }
+}
+
+async function startStation(station) {
+  activeStation = station;
+  const { data: conditions } = await sbClient
+    .from('comparison_conditions')
+    .select('*')
+    .eq('station_id', station.id)
+    .order('order_index');
+
+  activeConditions = conditions || [];
+  if (activeConditions.length === 0) {
+    document.getElementById('mainContent').innerHTML = `<div class="view"><div class="no-station-msg">⚠️ المحطة دي معندهاش شروط مضافة بعد.</div></div>`;
+    return;
+  }
+
+  resetScanCycle();
+  renderScanView();
+}
+
+function resetScanCycle() {
+  currentConditionIndex = 0;
+  scannedValues = {};
+  rawScannedValues = {};
+}
+
+function renderScanView() {
+  const content = document.getElementById('mainContent');
+  const currentCondition = activeConditions[currentConditionIndex];
+
+  content.innerHTML = `
+    <div class="view">
+      <div class="station-name">🏭 ${activeStation.name}</div>
+      <div class="progress-text">الشرط ${currentConditionIndex + 1} من ${activeConditions.length}</div>
+      <div class="condition-name">${currentCondition.name}</div>
+      <div class="scan-row">
+        <input type="text" id="scanInput" placeholder="اكتب أو استخدم السكانر..." autocomplete="off" />
+        <button type="button" class="scan-btn" id="openCameraBtn">📷</button>
+      </div>
+      <div class="progress-dots">
+        ${activeConditions.map((c, idx) => `
+          <div class="progress-dot ${idx < currentConditionIndex ? 'done' : idx === currentConditionIndex ? 'current' : ''}"></div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+
+  const input = document.getElementById('scanInput');
+  input.focus();
+
+  input.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleScanValue(input.value.trim());
+    }
+  });
+
+  document.getElementById('openCameraBtn').addEventListener('click', () => {
+    scannerModal.classList.add('open');
+    currentScanner = startBarcodeScanner('scannerContainer', (decodedText) => {
+      closeScannerModal();
+      handleScanValue(decodedText);
+    }, (err) => console.error('Scanner error:', err));
+  });
+}
+
+function extractValue(rawValue, startPos, endPos) {
+  if (!startPos || !endPos) return rawValue;
+  return rawValue.substring(startPos - 1, endPos);
+}
+
+async function handleScanValue(rawValue) {
+  if (!rawValue) return;
+  const condition = activeConditions[currentConditionIndex];
+  const extracted = extractValue(rawValue, condition.extract_start, condition.extract_end);
+
+  scannedValues[condition.order_index] = extracted;
+  rawScannedValues[condition.order_index] = rawValue;
+
+  if (currentConditionIndex < activeConditions.length - 1) {
+    currentConditionIndex++;
+    renderScanView();
+  } else {
+    await runComparison();
+  }
+}
+
+async function runComparison() {
+  let result = 'ok';
+  const mismatches = [];
+
+  const dbConditions = activeConditions.filter(c => c.comparison_type === 'database').sort((a, b) => a.order_index - b.order_index);
+  let referenceRow = null;
+
+  if (dbConditions.length > 0) {
+    const keyCondition = dbConditions[0];
+    const keyValue = scannedValues[keyCondition.order_index];
+
+    const { data: refRows } = await sbClient
+      .from('comparison_reference_data')
+      .select('*')
+      .eq('station_id', activeStation.id);
+
+    referenceRow = (refRows || []).find(r => (r.expected_values || {})[keyCondition.order_index] === keyValue);
+
+    if (!referenceRow) {
+      result = 'undefined';
+    } else {
+      dbConditions.forEach(c => {
+        const expected = (referenceRow.expected_values || {})[c.order_index];
+        const actual = scannedValues[c.order_index];
+        if (expected !== undefined && expected !== actual) {
+          result = 'ng';
+          mismatches.push(`${c.name}: متوقع "${expected}" لكن القيمة "${actual}"`);
+        }
+      });
+    }
+  }
+
+  activeConditions.filter(c => c.comparison_type === 'peer').forEach(c => {
+    const myValue = scannedValues[c.order_index];
+    const peerValue = scannedValues[c.peer_condition_order];
+    if (myValue !== peerValue) {
+      result = 'ng';
+      const peerCond = activeConditions.find(pc => pc.order_index === c.peer_condition_order);
+      mismatches.push(`${c.name} (${myValue}) لا يطابق ${peerCond ? peerCond.name : ''} (${peerValue})`);
+    }
+  });
+
+  showResult(result, mismatches.join(' | '));
+
+  try {
+    await sbClient.from('comparison_logs').insert([{
+      station_id: activeStation.id,
+      station_name: activeStation.name,
+      scanned_values: rawScannedValues,
+      result,
+      mismatch_details: mismatches.join(' | ') || null,
+      performed_by: currentUser.id,
+      performed_by_email: currentUser.email,
+    }]);
+  } catch (err) {
+    console.warn('فشل تسجيل نتيجة المقارنة:', err);
+  }
+}
+
+function showResult(result, detail) {
+  const overlay = document.getElementById('resultOverlay');
+  const icon = document.getElementById('resultIcon');
+  const text = document.getElementById('resultText');
+  const detailEl = document.getElementById('resultDetail');
+
+  overlay.className = 'result-overlay show ' + result;
+
+  if (result === 'ok') {
+    icon.textContent = '✔';
+    text.textContent = 'OK - مطابق';
+    detailEl.textContent = '';
+  } else if (result === 'ng') {
+    icon.textContent = '✘';
+    text.textContent = 'NG - غير مطابق';
+    detailEl.textContent = detail;
+  } else {
+    icon.textContent = '⚠';
+    text.textContent = 'غير معرّف';
+    detailEl.textContent = 'القيمة دي مش موجودة في قاعدة البيانات المرجعية';
+  }
+
+  if (result === 'ok') {
+    setTimeout(() => { dismissResult(); }, 900);
+  }
+}
+
+function dismissResult() {
+  document.getElementById('resultOverlay').classList.remove('show');
+  resetScanCycle();
+  renderScanView();
+}
+document.getElementById('resultCloseBtn').addEventListener('click', dismissResult);
+
+const scannerModal = document.getElementById('scannerModal');
+async function closeScannerModal() {
+  scannerModal.classList.remove('open');
+  if (currentScanner) {
+    await currentScanner.stop();
+    currentScanner = null;
+  }
+}
+document.getElementById('closeScannerBtn').addEventListener('click', closeScannerModal);
+</script>
+</body>
+</html>

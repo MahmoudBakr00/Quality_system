@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<link rel="manifest" href="manifest.json" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="متابعة العيوب" />
+<link rel="apple-touch-icon" href="icon-180.png" />
+<meta name="theme-color" content="#3b82f6" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>سجل المقارنات - نظام تسجيل العيوب</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+body { background: #0f172a; padding: 20px; color: #f1f5f9; }
+.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; background: #1e293b; padding: 14px 20px; border-radius: 12px; flex-wrap: wrap; gap: 10px; }
+.back-link { color: #93c5fd; text-decoration: none; font-weight: 600; font-size: 14px; }
+.tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+.tab-btn { background: #1e293b; color: #94a3b8; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 14px; }
+.tab-btn.active { background: #3b82f6; color: white; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+.panel { background: #1e293b; border-radius: 14px; padding: 20px; margin-bottom: 16px; }
+.panel h2 { color: #60a5fa; font-size: 16px; margin-bottom: 14px; }
+label { color: #cbd5e1; display: block; margin-bottom: 6px; font-weight: 600; font-size: 13px; margin-top: 10px; }
+input, select, textarea { width: 100%; padding: 10px 12px; border: none; border-radius: 8px; background: #334155; color: #f1f5f9; font-size: 14px; }
+.small-btn { background: #3b82f6; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: bold; }
+.small-btn.danger { background: #ef4444; }
+.small-btn.green { background: #22c55e; }
+.station-card { background: #0f172a; border-radius: 10px; padding: 14px; margin-bottom: 10px; border: 1px solid #334155; }
+.station-card .s-title { display: flex; justify-content: space-between; align-items: center; }
+.station-card .s-title span { font-weight: bold; color: #f1f5f9; }
+.condition-row { background: #1e293b; border-radius: 8px; padding: 10px; margin-bottom: 8px; display: grid; grid-template-columns: 1fr 1fr 1fr 1fr auto; gap: 8px; align-items: center; }
+.condition-row input, .condition-row select { font-size: 12px; padding: 6px 8px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { background: #334155; color: #94a3b8; padding: 8px; text-align: center; }
+td { padding: 8px; text-align: center; border-bottom: 1px solid #334155; }
+.filter-bar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.result-badge { padding: 3px 10px; border-radius: 12px; font-weight: bold; font-size: 11px; }
+.result-badge.ok { background: #22c55e; color: white; }
+.result-badge.ng { background: #ef4444; color: white; }
+.result-badge.undefined { background: #fbbf24; color: #78350f; }
+.checkbox-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.checkbox-row input { width: auto; }
+.user-check-list { max-height: 150px; overflow-y: auto; background: #0f172a; border-radius: 8px; padding: 8px; margin-top: 6px; }
+.user-check-list label { display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 4px 0; font-weight: normal; }
+.user-check-list input { width: auto; }
+</style>
+</head>
+<body>
+<div class="header">
+<a href="dashboard.html" class="back-link">⬅ الداشبورد الرئيسي</a>
+<div style="display:flex; align-items:center; gap:10px;">
+<div id="notifBellWrap"></div>
+<span id="userEmail" style="color:#94a3b8; font-size:13px;"></span>
+</div>
+</div>
+
+<h1 style="color:#60a5fa; margin-bottom:16px;">🔍 نظام مقارنة السيريال/الباركود</h1>
+
+<div class="tabs">
+<button class="tab-btn active" data-tab="logsTab">📋 سجل المقارنات</button>
+<button class="tab-btn" data-tab="stationsTab" id="stationsTabBtn" style="display:none;">⚙️ إدارة المحطات</button>
+</div>
+
+<div class="tab-content active" id="logsTab">
+<div class="panel">
+<div class="filter-bar">
+  <select id="logFilterStation"><option value="">كل المحطات</option></select>
+  <select id="logFilterResult">
+    <option value="">كل النتائج</option>
+    <option value="ok">✅ مطابق</option>
+    <option value="ng">❌ غير مطابق</option>
+    <option value="undefined">⚠️ غير معرّف</option>
+  </select>
+  <input type="text" id="logFilterUser" placeholder="بحث بالمستخدم" />
+  <button class="small-btn" id="applyLogFilter">🔍 تصفية</button>
+  <button class="small-btn" id="resetLogFilter" style="background:#64748b;">↺ إعادة تعيين</button>
+</div>
+<div style="overflow-x:auto;">
+<table>
+<thead><tr>
+  <th>المحطة</th><th>القيم المسكونة</th><th>النتيجة</th><th>تفاصيل</th><th>المستخدم</th><th>التاريخ</th>
+</tr></thead>
+<tbody id="logsTbody"><tr><td colspan="6">⏳ جاري التحميل...</td></tr></tbody>
+</table>
+</div>
+</div>
+</div>
+
+<div class="tab-content" id="stationsTab">
+
+<div class="panel">
+<h2>➕ إضافة محطة مقارنة جديدة</h2>
+<label>اسم المحطة</label>
+<input type="text" id="newStationName" placeholder="مثال: خط تغليف 1" />
+<button class="small-btn" style="margin-top:12px;" id="createStationBtn">➕ إنشاء المحطة</button>
+</div>
+
+<div class="panel">
+<h2>🏭 المحطات الموجودة</h2>
+<div id="stationsList"><div>⏳ جاري التحميل...</div></div>
+</div>
+
+</div>
+
+<script src="shared.js"></script>
+<script>
+let currentUser = null;
+let currentRole = null;
+let isFullAccess = false;
+let allStationsCache = [];
+
+async function init() {
+  const auth = await requireAuth();
+  if (!auth) return;
+  currentUser = auth.user;
+  currentRole = auth.role;
+  isFullAccess = currentRole === 'admin' || currentRole === 'general_supervisor';
+  document.getElementById('userEmail').textContent = auth.user.email;
+  renderNotificationBell('notifBellWrap', auth.user.id);
+
+  if (isFullAccess) {
+    document.getElementById('stationsTabBtn').style.display = 'inline-block';
+  }
+
+  loadStationsForFilter();
+  loadLogs();
+  if (isFullAccess) loadStationsManagement();
+}
+init();
+
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(btn.dataset.tab).classList.add('active');
+  });
+});
+
+async function loadStationsForFilter() {
+  const { data } = await sbClient.from('comparison_stations').select('id, name').order('name');
+  allStationsCache = data || [];
+  const select = document.getElementById('logFilterStation');
+  select.innerHTML = '<option value="">كل المحطات</option>';
+  allStationsCache.forEach(s => {
+    const o = document.createElement('option');
+    o.value = s.id; o.textContent = s.name;
+    select.appendChild(o);
+  });
+}
+
+async function loadLogs() {
+  const tbody = document.getElementById('logsTbody');
+  tbody.innerHTML = '<tr><td colspan="6">⏳ جاري التحميل...</td></tr>';
+
+  const stationId = document.getElementById('logFilterStation').value;
+  const result = document.getElementById('logFilterResult').value;
+  const userSearch = document.getElementById('logFilterUser').value.trim();
+
+  let query = sbClient.from('comparison_logs').select('*').order('created_at', { ascending: false }).limit(500);
+  if (stationId) query = query.eq('station_id', stationId);
+  if (result) query = query.eq('result', result);
+  if (userSearch) query = query.ilike('performed_by_email', `%${userSearch}%`);
+
+  const { data, error } = await query;
+  if (error || !data || data.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6">📭 لا توجد نتائج</td></tr>';
+    return;
+  }
+
+  const resultText = { ok: '✅ مطابق', ng: '❌ غير مطابق', undefined: '⚠️ غير معرّف' };
+  tbody.innerHTML = data.map(log => `
+    <tr>
+      <td>${log.station_name || '-'}</td>
+      <td style="font-size:11px; text-align:right;">${Object.values(log.scanned_values || {}).join(' | ')}</td>
+      <td><span class="result-badge ${log.result}">${resultText[log.result]}</span></td>
+      <td style="font-size:11px;">${log.mismatch_details || '-'}</td>
+      <td>${log.performed_by_email ? log.performed_by_email.split('@')[0] : '-'}</td>
+      <td style="font-size:11px;">${formatDate(log.created_at)}</td>
+    </tr>
+  `).join('');
+}
+
+document.getElementById('applyLogFilter').addEventListener('click', loadLogs);
+document.getElementById('resetLogFilter').addEventListener('click', () => {
+  document.getElementById('logFilterStation').value = '';
+  document.getElementById('logFilterResult').value = '';
+  document.getElementById('logFilterUser').value = '';
+  loadLogs();
+});
+
+let allUsersCache = [];
+
+async function loadStationsManagement() {
+  const { data: users } = await sbClient.from('profiles').select('id, email').order('email');
+  allUsersCache = users || [];
+  loadStationsList();
+}
+
+document.getElementById('createStationBtn').addEventListener('click', async () => {
+  const name = document.getElementById('newStationName').value.trim();
+  if (!name) { alert('⚠️ اكتب اسم المحطة'); return; }
+
+  const { error } = await sbClient.from('comparison_stations').insert([{ name, created_by: currentUser.id }]);
+  if (error) { alert('❌ ' + error.message); return; }
+
+  document.getElementById('newStationName').value = '';
+  loadStationsList();
+  loadStationsForFilter();
+});
+
+async function loadStationsList() {
+  const container = document.getElementById('stationsList');
+  container.innerHTML = '⏳ جاري التحميل...';
+
+  const { data: stations } = await sbClient.from('comparison_stations').select('*').order('name');
+  const { data: allConditions } = await sbClient.from('comparison_conditions').select('*').order('order_index');
+  const { data: allAssignments } = await sbClient.from('comparison_station_users').select('*, profiles(email)');
+
+  if (!stations || stations.length === 0) {
+    container.innerHTML = '<div style="color:#64748b;">لا توجد محطات مضافة بعد</div>';
+    return;
+  }
+
+  container.innerHTML = stations.map(s => {
+    const conditions = (allConditions || []).filter(c => c.station_id === s.id);
+    const assignments = (allAssignments || []).filter(a => a.station_id === s.id);
+    return `
+    <div class="station-card">
+      <div class="s-title">
+        <span>🏭 ${s.name}</span>
+        <button class="small-btn danger" data-station-id="${s.id}" onclick="deleteComparisonStation('${s.id}')">🗑 حذف المحطة</button>
+      </div>
+
+      <label>👥 المستخدمين المسموح لهم بالمحطة دي:</label>
+      <div class="user-check-list" id="users-${s.id}">
+        ${allUsersCache.map(u => `
+          <label><input type="checkbox" class="station-user-cb" data-station-id="${s.id}" data-user-id="${u.id}" ${assignments.some(a => a.user_id === u.id) ? 'checked' : ''} /> ${u.email}</label>
+        `).join('')}
+      </div>
+
+      <label style="margin-top:14px;">📝 الشروط (بالترتيب):</label>
+      <div id="conditions-${s.id}">
+        ${conditions.map(c => renderConditionRow(c)).join('') || '<div style="color:#64748b; font-size:12px;">لا يوجد شروط بعد</div>'}
+      </div>
+      <button class="small-btn green" style="margin-top:8px;" onclick="addConditionRow('${s.id}')">➕ إضافة شرط جديد</button>
+
+      <label style="margin-top:14px;">📊 قاعدة البيانات المرجعية:</label>
+      <div style="display:flex; gap:8px; align-items:center; margin-top:6px;">
+        <input type="file" accept=".xlsx,.xls,.csv" id="refFile-${s.id}" style="flex:1;" />
+        <button class="small-btn" onclick="uploadReferenceData('${s.id}')">📊 رفع</button>
+      </div>
+      <div style="color:#64748b; font-size:11px; margin-top:6px;">الأعمدة بالترتيب: عمود لكل شرط يستخدم "مقارنة مع قاعدة البيانات" (بنفس ترتيب الشروط)</div>
+      <div id="refCount-${s.id}" style="color:#93c5fd; font-size:12px; margin-top:6px;"></div>
+    </div>
+    `;
+  }).join('');
+
+  container.querySelectorAll('.station-user-cb').forEach(cb => {
+    cb.addEventListener('change', async () => {
+      const stationId = cb.dataset.stationId;
+      const userId = cb.dataset.userId;
+      if (cb.checked) {
+        await sbClient.from('comparison_station_users').insert([{ station_id: stationId, user_id: userId }]);
+      } else {
+        await sbClient.from('comparison_station_users').delete().eq('station_id', stationId).eq('user_id', userId);
+      }
+    });
+  });
+
+  stations.forEach(async (s) => {
+    const { count } = await sbClient.from('comparison_reference_data').select('id', { count: 'exact', head: true }).eq('station_id', s.id);
+    const el = document.getElementById(`refCount-${s.id}`);
+    if (el) el.textContent = `عدد الصفوف المخزّنة حاليًا: ${count || 0}`;
+  });
+}
+
+function renderConditionRow(c) {
+  return `
+    <div class="condition-row" data-condition-id="${c.id}">
+      <input type="text" class="cond-name" value="${c.name}" placeholder="اسم الشرط" />
+      <input type="text" class="cond-extract" value="${c.extract_start ? c.extract_start + '-' + c.extract_end : ''}" placeholder="مدى الاستخراج مثل 4-11" />
+      <select class="cond-type">
+        <option value="database" ${c.comparison_type === 'database' ? 'selected' : ''}>مقارنة مع قاعدة البيانات</option>
+        <option value="peer" ${c.comparison_type === 'peer' ? 'selected' : ''}>مقارنة مباشرة مع شرط تاني</option>
+      </select>
+      <input type="number" class="cond-peer" value="${c.peer_condition_order || ''}" placeholder="رقم الشرط (لو مباشرة)" min="1" />
+      <div style="display:flex; gap:4px;">
+        <button class="small-btn" onclick="saveConditionRow('${c.id}')">💾</button>
+        <button class="small-btn danger" onclick="deleteConditionRow('${c.id}')">🗑</button>
+      </div>
+    </div>
+  `;
+}
+
+async function addConditionRow(stationId) {
+  const { data: existing } = await sbClient.from('comparison_conditions').select('order_index').eq('station_id', stationId).order('order_index', { ascending: false }).limit(1);
+  const nextOrder = existing && existing.length > 0 ? existing[0].order_index + 1 : 1;
+
+  const { error } = await sbClient.from('comparison_conditions').insert([{
+    station_id: stationId, order_index: nextOrder, name: 'شرط جديد', comparison_type: 'database'
+  }]);
+  if (error) { alert('❌ ' + error.message); return; }
+  loadStationsList();
+}
+
+async function saveConditionRow(conditionId) {
+  const row = document.querySelector(`.condition-row[data-condition-id="${conditionId}"]`);
+  const name = row.querySelector('.cond-name').value.trim();
+  const extractRaw = row.querySelector('.cond-extract').value.trim();
+  const type = row.querySelector('.cond-type').value;
+  const peerOrder = row.querySelector('.cond-peer').value.trim();
+
+  let extractStart = null, extractEnd = null;
+  if (extractRaw.includes('-')) {
+    const parts = extractRaw.split('-').map(v => parseInt(v.trim(), 10));
+    if (!isNaN(parts[0]) && !isNaN(parts[1])) { extractStart = parts[0]; extractEnd = parts[1]; }
+  }
+
+  if (!name) { alert('⚠️ اكتب اسم الشرط'); return; }
+  if (type === 'peer' && !peerOrder) { alert('⚠️ حدد رقم الشرط اللي هيتقارن بيه'); return; }
+
+  const { error } = await sbClient.from('comparison_conditions').update({
+    name, extract_start: extractStart, extract_end: extractEnd,
+    comparison_type: type, peer_condition_order: type === 'peer' ? parseInt(peerOrder, 10) : null,
+  }).eq('id', conditionId);
+
+  if (error) { alert('❌ ' + error.message); return; }
+  alert('✅ تم الحفظ');
+  loadStationsList();
+}
+
+async function deleteConditionRow(conditionId) {
+  if (!confirm('متأكد من حذف الشرط ده؟')) return;
+  await sbClient.from('comparison_conditions').delete().eq('id', conditionId);
+  loadStationsList();
+}
+
+async function deleteComparisonStation(stationId) {
+  if (!confirm('⚠️ متأكد من حذف المحطة دي؟ هيتحذف معاها كل الشروط وقاعدة البيانات المرجعية بتاعتها!')) return;
+  await sbClient.from('comparison_stations').delete().eq('id', stationId);
+  loadStationsList();
+  loadStationsForFilter();
+}
+
+async function uploadReferenceData(stationId) {
+  const fileInput = document.getElementById(`refFile-${stationId}`);
+  const file = fileInput.files[0];
+  if (!file) { alert('⚠️ اختر ملف إكسيل أولاً'); return; }
+
+  try {
+    const { data: conditions } = await sbClient.from('comparison_conditions')
+      .select('*').eq('station_id', stationId).eq('comparison_type', 'database').order('order_index');
+
+    if (!conditions || conditions.length === 0) {
+      alert('⚠️ لازم تضيف شروط من نوع "مقارنة مع قاعدة البيانات" الأول قبل رفع الملف');
+      return;
+    }
+
+    const data = await file.arrayBuffer();
+    const workbook = XLSX.read(data, { type: 'array' });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+    const rowsToInsert = rows
+      .filter(r => r && r.length > 0 && r[0] !== undefined && r[0] !== null && String(r[0]).trim() !== '')
+      .map(r => {
+        const expectedValues = {};
+        conditions.forEach((c, idx) => {
+          const cellValue = r[idx];
+          if (cellValue !== undefined && cellValue !== null) {
+            expectedValues[c.order_index] = String(cellValue).trim();
+          }
+        });
+        return { station_id: stationId, expected_values: expectedValues };
+      });
+
+    if (rowsToInsert.length === 0) {
+      alert('⚠️ لم يتم العثور على بيانات صالحة في الملف');
+      return;
+    }
+
+    const { error } = await sbClient.from('comparison_reference_data').insert(rowsToInsert);
+    if (error) throw error;
+
+    alert(`✅ تمت إضافة ${rowsToInsert.length} صف بنجاح`);
+    loadStationsList();
+  } catch (err) {
+    alert('❌ فشل رفع الملف: ' + err.message);
+    console.error(err);
+  }
+}
+</script>
+</body>
+</html>
