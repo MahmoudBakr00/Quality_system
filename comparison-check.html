@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<link rel="manifest" href="manifest.json" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="متابعة العيوب" />
+<link rel="apple-touch-icon" href="icon-180.png" />
+<meta name="theme-color" content="#3b82f6" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>فحص المطابقة المتكامل - نظام تسجيل العيوب</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+body { background: #0f172a; padding: 20px; color: #f1f5f9; min-height: 100vh; }
+.container { max-width: 700px; margin: 0 auto; }
+.sub-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; background: #1e293b; padding: 14px 20px; border-radius: 12px; }
+.back-link { color: #93c5fd; text-decoration: none; font-weight: 600; font-size: 14px; }
+.back-link:hover { text-decoration: underline; }
+
+.view { background: #1e293b; border-radius: 16px; padding: 28px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); margin-bottom: 20px; }
+.view h1 { text-align: center; color: #60a5fa; margin-bottom: 24px; font-size: 22px; }
+
+label { color: #cbd5e1; display: block; margin-bottom: 6px; font-weight: 600; font-size: 14px; }
+select, input[type="text"] { width: 100%; padding: 12px 14px; margin-bottom: 18px; border: none; border-radius: 8px; background: #334155; color: #f1f5f9; font-size: 15px; }
+select:focus, input:focus { outline: 2px solid #3b82f6; }
+
+.scan-row { display: flex; gap: 10px; margin-bottom: 8px; }
+.scan-row input { flex: 1; margin-bottom: 0; }
+.scan-btn { border: none; padding: 0 18px; border-radius: 8px; cursor: pointer; font-weight: bold; white-space: nowrap; color: white; font-size: 14px; }
+.scan-btn.serial { background: #8b5cf6; }
+.scan-btn.serial:hover { background: #7c3aed; }
+.scan-btn.qr { background: #06b6d4; }
+.scan-btn.qr:hover { background: #0891b2; }
+
+.extract-preview { background: #0f172a; border-radius: 8px; padding: 10px 14px; margin: -10px 0 18px; display: none; }
+.extract-preview .title { color: #94a3b8; font-size: 11px; margin-bottom: 4px; }
+.extract-preview .value { color: #fbbf24; font-size: 13px; font-weight: bold; font-family: monospace; direction: ltr; text-align: right; }
+
+.btn-check { width: 100%; padding: 16px; background: #3b82f6; color: white; border: none; border-radius: 12px; font-size: 20px; font-weight: bold; cursor: pointer; margin-top: 10px; transition: all 0.2s; }
+.btn-check:hover { background: #2563eb; transform: translateY(-2px); }
+.btn-check:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+/* شاشة النتيجة الكاملة */
+.result-overlay { display: none; position: fixed; inset: 0; z-index: 200; align-items: center; justify-content: center; flex-direction: column; text-align: center; padding: 20px; animation: fadeIn 0.3s ease; }
+.result-overlay.show { display: flex; }
+.result-overlay.ok { background: linear-gradient(135deg, #16a34a 0%, #22c55e 100%); }
+.result-overlay.ng { background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%); }
+.result-overlay.undefined { background: linear-gradient(135deg, #d97706 0%, #fbbf24 100%); }
+@keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+.result-overlay .result-icon { font-size: 6rem; margin-bottom: 16px; animation: bounceIn 0.5s ease; }
+@keyframes bounceIn { 0% { transform: scale(0); } 50% { transform: scale(1.2); } 100% { transform: scale(1); } }
+.result-overlay .result-text { font-size: 3rem; font-weight: bold; color: white; margin-bottom: 12px; text-shadow: 0 2px 10px rgba(0,0,0,0.3); }
+.result-overlay .result-sub { color: rgba(255,255,255,0.9); font-size: 16px; margin-bottom: 24px; }
+.result-overlay .result-detail { background: rgba(0,0,0,0.2); border-radius: 12px; padding: 16px 20px; margin-bottom: 24px; max-width: 90%; direction: ltr; text-align: right; }
+.result-overlay .result-detail .detail-row { display: flex; justify-content: space-between; gap: 20px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.1); font-size: 13px; }
+.result-overlay .result-detail .detail-row:last-child { border-bottom: none; }
+.result-overlay .result-detail .detail-label { color: rgba(255,255,255,0.7); }
+.result-overlay .result-detail .detail-value { color: white; font-weight: bold; font-family: monospace; }
+.result-overlay .result-detail .detail-value.match { color: #86efac; }
+.result-overlay .result-detail .detail-value.mismatch { color: #fca5a5; }
+.result-overlay button { background: white; color: #333; border: none; padding: 14px 40px; border-radius: 50px; font-size: 18px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.2); transition: all 0.2s; }
+.result-overlay button:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.3); }
+
+/* Scanner Modal */
+#scannerModal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 100; align-items: center; justify-content: center; }
+#scannerModal.open { display: flex; }
+.scanner-box { background: #1e293b; border-radius: 16px; padding: 24px; width: 90%; max-width: 420px; }
+.scanner-box h3 { color: #60a5fa; margin-bottom: 16px; text-align: center; font-size: 16px; }
+#scannerContainer { width: 100%; border-radius: 12px; overflow: hidden; }
+.scanner-close { width: 100%; margin-top: 16px; padding: 12px; background: #64748b; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 14px; }
+.scanner-close:hover { background: #475569; }
+
+/* Conditions Preview */
+.conditions-preview { background: #0f172a; border-radius: 10px; padding: 14px; margin-bottom: 18px; display: none; }
+.conditions-preview h4 { color: #60a5fa; font-size: 13px; margin-bottom: 10px; }
+.condition-chip { display: inline-flex; align-items: center; gap: 6px; background: #334155; padding: 6px 12px; border-radius: 20px; font-size: 12px; margin: 3px; }
+.condition-chip .chip-type { font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: bold; }
+.condition-chip .chip-type.peer { background: #8b5cf6; color: white; }
+.condition-chip .chip-type.db { background: #06b6d4; color: white; }
+
+/* Recent Logs */
+.recent-log { background: #1e293b; border-radius: 14px; padding: 20px; }
+.recent-log h3 { color: #60a5fa; font-size: 15px; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+.log-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #334155; font-size: 12px; }
+.log-row:last-child { border-bottom: none; }
+.log-row .log-info { flex: 1; }
+.log-row .log-station { color: #94a3b8; font-size: 11px; }
+.log-row .log-serial { color: #f1f5f9; font-family: monospace; font-size: 12px; margin-top: 2px; direction: ltr; text-align: right; }
+.log-badge { padding: 4px 12px; border-radius: 20px; font-weight: bold; font-size: 11px; white-space: nowrap; }
+.log-badge.ok { background: #22c55e; color: white; }
+.log-badge.ng { background: #ef4444; color: white; }
+.log-badge.undefined { background: #fbbf24; color: #78350f; }
+
+/* Condition Results Table */
+.condition-results { width: 100%; margin-top: 12px; border-collapse: collapse; font-size: 12px; }
+.condition-results th { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.8); padding: 8px; text-align: right; }
+.condition-results td { padding: 8px; border-bottom: 1px solid rgba(255,255,255,0.1); }
+.condition-results .cond-match { color: #86efac; }
+.condition-results .cond-mismatch { color: #fca5a5; font-weight: bold; }
+.condition-results .cond-undefined { color: #fcd34d; }
+
+/* Stats bar */
+.stats-bar { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+.stat-card { flex: 1; min-width: 100px; background: #1e293b; border-radius: 10px; padding: 12px; text-align: center; }
+.stat-card .stat-number { font-size: 24px; font-weight: bold; color: #60a5fa; }
+.stat-card .stat-label { font-size: 11px; color: #94a3b8; margin-top: 4px; }
+
+.empty-state { text-align: center; padding: 40px; color: #64748b; }
+.empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="sub-header">
+    <a href="home.html" class="back-link">⬅ الرئيسية</a>
+    <div style="display:flex; align-items:center; gap:10px;">
+      <div id="langToggleWrap"></div>
+      <span id="userEmail" style="color:#94a3b8; font-size:13px;"></span>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-bar">
+    <div class="stat-card">
+      <div class="stat-number" id="statTotal">0</div>
+      <div class="stat-label">إجمالي الفحوصات</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-number" id="statOk" style="color:#22c55e;">0</div>
+      <div class="stat-label">مطابق</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-number" id="statNg" style="color:#ef4444;">0</div>
+      <div class="stat-label">غير مطابق</div>
+    </div>
+  </div>
+
+  <div class="view">
+    <h1>🔍 فحص المطابقة المتكامل</h1>
+
+    <label>🏭 محطة الفحص</label>
+    <select id="stationSelect" required>
+      <option value="">⏳ جاري تحميل المحطات...</option>
+    </select>
+
+    <!-- عرض الشروط المفعلة -->
+    <div class="conditions-preview" id="conditionsPreview">
+      <h4>📋 الشروط المفعلة:</h4>
+      <div id="conditionsChips"></div>
+    </div>
+
+    <label>🔢 سيريال المنتج</label>
+    <div class="scan-row">
+      <input type="text" id="serialInput" placeholder="اكتب السيريال أو استخدم الباركود سكانر" autocomplete="off" />
+      <button type="button" class="scan-btn serial" id="openSerialScannerBtn">📷 باركود</button>
+    </div>
+    <div class="extract-preview" id="serialExtractPreview">
+      <div class="title">القيم المستخرجة من السيريال:</div>
+      <div class="value" id="serialExtractValue"></div>
+    </div>
+
+    <label>📱 QR Code / لينك</label>
+    <div class="scan-row">
+      <input type="text" id="qrInput" placeholder="اكتب الـ QR أو استخدم الكاميرا" autocomplete="off" />
+      <button type="button" class="scan-btn qr" id="openQrScannerBtn">📷 QR</button>
+    </div>
+    <div class="extract-preview" id="qrExtractPreview">
+      <div class="title">القيم المستخرجة من QR:</div>
+      <div class="value" id="qrExtractValue"></div>
+    </div>
+
+    <button class="btn-check" id="checkBtn">🔎 تنفيذ الفحص</button>
+  </div>
+
+  <!-- Recent Logs -->
+  <div class="recent-log">
+    <h3>📋 آخر عمليات الفحص <span style="color:#64748b; font-size:12px; font-weight:normal;">(اليوم)</span></h3>
+    <div id="recentLogList">
+      <div class="empty-state">
+        <div class="icon">📭</div>
+        <div>لا توجد عمليات فحص بعد</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Scanner Modal -->
+<div id="scannerModal">
+  <div class="scanner-box">
+    <h3 id="scannerTitle">📷 وجّه الكاميرا</h3>
+    <div id="scannerContainer"></div>
+    <button class="scanner-close" id="closeScannerBtn">إغلاق</button>
+  </div>
+</div>
+
+<!-- Result Overlay -->
+<div class="result-overlay" id="resultOverlay">
+  <div class="result-icon" id="resultIcon">✔</div>
+  <div class="result-text" id="resultText">OK</div>
+  <div class="result-sub" id="resultSub">جميع الشروط مطابقة</div>
+  <div class="result-detail" id="resultDetail"></div>
+  <button id="resultCloseBtn">✓ موافق — فحص جديد</button>
+</div>
+
+<script src="shared.js"></script>
+<script>
+let currentUser = null;
+let currentScanner = null;
+let currentStation = null;
+let currentConditions = [];
+let todayStats = { total: 0, ok: 0, ng: 0 };
+
+// =========================================================
+// Initialization
+// =========================================================
+async function init() {
+  applyTranslations();
+  renderLangToggle('langToggleWrap');
+  const auth = await requireAuth();
+  if (!auth) return;
+  currentUser = auth.user;
+  document.getElementById('userEmail').textContent = auth.user.email;
+
+  await loadStations();
+  loadTodayStats();
+  loadRecentLogs();
+
+  // Auto-focus on serial input for barcode scanner
+  document.getElementById('serialInput').focus();
+}
+init();
+
+// =========================================================
+// Load Stations
+// =========================================================
+async function loadStations() {
+  const select = document.getElementById('stationSelect');
+
+  try {
+    const { data, error } = await sbClient
+      .from('comparison_stations')
+      .select('*')
+      .order('name');
+
+    if (error) throw error;
+
+    if (!data || data.length === 0) {
+      select.innerHTML = '<option value="">📭 لا توجد محطات مضافة</option>';
+      return;
+    }
+
+    select.innerHTML = '<option value="">-- اختر محطة الفحص --</option>';
+    data.forEach(s => {
+      const o = document.createElement('option');
+      o.value = s.id;
+      o.textContent = s.name;
+      o.dataset.name = s.name;
+      select.appendChild(o);
+    });
+  } catch (err) {
+    console.error('فشل تحميل المحطات:', err);
+    select.innerHTML = '<option value="">❌ فشل التحميل</option>';
+  }
+}
+
+// =========================================================
+// Load Conditions when station changes
+// =========================================================
+document.getElementById('stationSelect').addEventListener('change', async (e) => {
+  const stationId = e.target.value;
+  const preview = document.getElementById('conditionsPreview');
+  const chips = document.getElementById('conditionsChips');
+
+  if (!stationId) {
+    preview.style.display = 'none';
+    currentConditions = [];
+    currentStation = null;
+    return;
+  }
+
+  currentStation = {
+    id: stationId,
+    name: e.target.selectedOptions[0].dataset.name
+  };
+
+  try {
+    const { data, error } = await sbClient
+      .from('comparison_conditions')
+      .select('*')
+      .eq('station_id', stationId)
+      .order('order_index');
+
+    if (error) throw error;
+    currentConditions = data || [];
+
+    if (currentConditions.length === 0) {
+      chips.innerHTML = '<span style="color:#fbbf24; font-size:12px;">⚠️ لا توجد شروط مضافة لهذه المحطة</span>';
+      preview.style.display = 'block';
+      return;
+    }
+
+    chips.innerHTML = currentConditions.map(c => `
+      <span class="condition-chip">
+        <span class="chip-type ${c.comparison_type === 'peer' ? 'peer' : 'db'}">${c.comparison_type === 'peer' ? '🔗' : '📊'}</span>
+        ${c.order_index}. ${c.name} 
+        <span style="color:#94a3b8;">(${c.extract_start}-${c.extract_end})</span>
+        ${c.comparison_type === 'peer' ? `<span style="color:#a78bfa;">← شرط #${c.peer_condition_order}</span>` : ''}
+      </span>
+    `).join('');
+
+    preview.style.display = 'block';
+
+    // Update extract previews
+    updateExtractPreviews();
+
+  } catch (err) {
+    console.error('فشل تحميل الشروط:', err);
+    chips.innerHTML = '<span style="color:#ef4444;">❌ فشل تحميل الشروط</span>';
+    preview.style.display = 'block';
+  }
+});
+
+// =========================================================
+// Extract Preview Logic
+// =========================================================
+function extractSubstring(str, start, end) {
+  if (!str || !start || !end) return null;
+  // 1-based to 0-based indexing
+  return str.substring(start - 1, end);
+}
+
+function updateExtractPreviews() {
+  const serial = document.getElementById('serialInput').value.trim();
+  const qr = document.getElementById('qrInput').value.trim();
+
+  const serialPreview = document.getElementById('serialExtractPreview');
+  const serialValue = document.getElementById('serialExtractValue');
+  const qrPreview = document.getElementById('qrExtractPreview');
+  const qrValue = document.getElementById('qrExtractValue');
+
+  if (!currentConditions.length) {
+    serialPreview.style.display = 'none';
+    qrPreview.style.display = 'none';
+    return;
+  }
+
+  // Show all extracted values
+  if (serial) {
+    const extracts = currentConditions.map(c => {
+      const val = extractSubstring(serial, c.extract_start, c.extract_end);
+      return `${c.order_index}: "${val || 'N/A'}"`;
+    }).join(' | ');
+    serialValue.textContent = extracts;
+    serialPreview.style.display = 'block';
+  } else {
+    serialPreview.style.display = 'none';
+  }
+
+  if (qr) {
+    const extracts = currentConditions.map(c => {
+      const val = extractSubstring(qr, c.extract_start, c.extract_end);
+      return `${c.order_index}: "${val || 'N/A'}"`;
+    }).join(' | ');
+    qrValue.textContent = extracts;
+    qrPreview.style.display = 'block';
+  } else {
+    qrPreview.style.display = 'none';
+  }
+}
+
+document.getElementById('serialInput').addEventListener('input', updateExtractPreviews);
+document.getElementById('qrInput').addEventListener('input', updateExtractPreviews);
+
+// =========================================================
+// Scanner Logic
+// =========================================================
+const scannerModal = document.getElementById('scannerModal');
+
+function openScanner(type) {
+  const title = document.getElementById('scannerTitle');
+  title.textContent = type === 'serial' 
+    ? '📷 وجّه الكاميرا نحو باركود السيريال' 
+    : '📷 وجّه الكاميرا نحو QR Code';
+
+  scannerModal.classList.add('open');
+
+  const onResult = (decodedText) => {
+    if (type === 'serial') {
+      document.getElementById('serialInput').value = decodedText;
+      document.getElementById('serialInput').dispatchEvent(new Event('input'));
+      // Auto-focus QR if serial is filled
+      if (!document.getElementById('qrInput').value) {
+        setTimeout(() => document.getElementById('qrInput').focus(), 300);
+      }
+    } else {
+      document.getElementById('qrInput').value = decodedText;
+      document.getElementById('qrInput').dispatchEvent(new Event('input'));
+    }
+    closeScannerModal();
+  };
+
+  const scannerFn = type === 'serial' ? startBarcodeScanner : startQrScanner;
+  currentScanner = scannerFn('scannerContainer', onResult, (err) => {
+    console.error('Scanner error:', err);
+  });
+}
+
+document.getElementById('openSerialScannerBtn').addEventListener('click', () => openScanner('serial'));
+document.getElementById('openQrScannerBtn').addEventListener('click', () => openScanner('qr'));
+
+async function closeScannerModal() {
+  scannerModal.classList.remove('open');
+  if (currentScanner) {
+    await currentScanner.stop();
+    currentScanner = null;
+  }
+}
+document.getElementById('closeScannerBtn').addEventListener('click', closeScannerModal);
+
+// =========================================================
+// Main Comparison Logic
+// =========================================================
+document.getElementById('checkBtn').addEventListener('click', runComparison);
+
+async function runComparison() {
+  const stationId = document.getElementById('stationSelect').value;
+  const serial = document.getElementById('serialInput').value.trim();
+  const qr = document.getElementById('qrInput').value.trim();
+
+  // Validation
+  if (!stationId) { alert('⚠️ اختر محطة الفحص أولاً'); return; }
+  if (!serial) { alert('⚠️ اكتب أو امسح سيريال المنتج'); return; }
+  if (!qr) { alert('⚠️ اكتب أو امسح QR Code'); return; }
+  if (currentConditions.length === 0) { alert('⚠️ لا توجد شروط مضافة لهذه المحطة'); return; }
+
+  const btn = document.getElementById('checkBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ جاري التحقق...';
+
+  try {
+    // Build condition results
+    const conditionResults = [];
+    const scannedValues = {};
+    let overallResult = 'ok';
+    let mismatchDetails = [];
+
+    for (const condition of currentConditions) {
+      const serialExtract = extractSubstring(serial, condition.extract_start, condition.extract_end);
+      const qrExtract = extractSubstring(qr, condition.extract_start, condition.extract_end);
+
+      scannedValues[condition.order_index] = serialExtract;
+
+      let match = false;
+      let detail = '';
+      let expectedValue = null;
+
+      if (condition.comparison_type === 'peer') {
+        // Compare with another condition's extracted value from serial
+        const peerCondition = currentConditions.find(c => c.order_index === condition.peer_condition_order);
+        const peerExtract = peerCondition ? extractSubstring(serial, peerCondition.extract_start, peerCondition.extract_end) : null;
+
+        match = serialExtract === peerExtract;
+        expectedValue = peerExtract;
+        detail = match ? 'مطابق' : `متوقع: "${peerExtract || 'N/A'}" | موجود: "${serialExtract || 'N/A'}"`;
+
+        if (!match) {
+          overallResult = 'ng';
+          mismatchDetails.push(`${condition.name}: ${serialExtract} ≠ ${peerExtract}`);
+        }
+
+      } else if (condition.comparison_type === 'database') {
+        // Compare with reference database
+        const { data: refData } = await sbClient
+          .from('comparison_reference_data')
+          .select('*')
+          .eq('station_id', stationId)
+          .eq(`expected_values->>${condition.order_index}`, serialExtract)
+          .limit(1);
+
+        match = refData && refData.length > 0;
+        expectedValue = match ? refData[0].expected_values[condition.order_index] : null;
+        detail = match ? 'موجود في قاعدة البيانات' : `غير موجود في القاعدة المرجعية`;
+
+        if (!match) {
+          overallResult = 'ng';
+          mismatchDetails.push(`${condition.name}: ${serialExtract} غير موجود في DB`);
+        }
+      }
+
+      conditionResults.push({
+        condition_id: condition.id,
+        condition_name: condition.name,
+        order_index: condition.order_index,
+        extracted_value: serialExtract,
+        expected_value: expectedValue,
+        comparison_type: condition.comparison_type,
+        match: match,
+        detail: detail
+      });
+    }
+
+    // Save log
+    const logPayload = {
+      station_id: stationId,
+      station_name: currentStation.name,
+      scanned_values: scannedValues,
+      result: overallResult,
+      mismatch_details: mismatchDetails.join('; '),
+      condition_results: conditionResults,
+      performed_by: currentUser.id,
+      performed_by_email: currentUser.email
+    };
+
+    const { error: logError } = await sbClient
+      .from('comparison_logs')
+      .insert([logPayload]);
+
+    if (logError) {
+      console.warn('فشل حفظ السجل:', logError);
+    }
+
+    // Show result
+    showResult(overallResult, conditionResults, serial, qr);
+
+    // Update stats
+    updateStats(overallResult);
+
+    // Refresh logs
+    loadRecentLogs();
+
+  } catch (err) {
+    console.error('خطأ في الفحص:', err);
+    alert('❌ حدث خطأ أثناء الفحص: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔎 تنفيذ الفحص';
+  }
+}
+
+// =========================================================
+// Show Result Overlay
+// =========================================================
+function showResult(result, conditionResults, serial, qr) {
+  const overlay = document.getElementById('resultOverlay');
+  const icon = document.getElementById('resultIcon');
+  const text = document.getElementById('resultText');
+  const sub = document.getElementById('resultSub');
+  const detail = document.getElementById('resultDetail');
+
+  overlay.className = 'result-overlay show ' + result;
+
+  if (result === 'ok') {
+    icon.textContent = '✔';
+    text.textContent = 'OK';
+    sub.textContent = '✅ جميع الشروط مطابقة — المنتج سليم';
+  } else if (result === 'ng') {
+    icon.textContent = '✘';
+    text.textContent = 'NG';
+    sub.textContent = '❌ يوجد عدم مطابقة — يحتاج مراجعة';
+  } else {
+    icon.textContent = '⚠';
+    text.textContent = 'غير محدد';
+    sub.textContent = '⚠️ لا توجد شروط مفعلة';
+  }
+
+  // Build detail table
+  const rows = conditionResults.map(cr => {
+    const statusClass = cr.match ? 'match' : 'mismatch';
+    const statusIcon = cr.match ? '✓' : '✗';
+    const statusText = cr.match ? 'مطابق' : 'غير مطابق';
+
+    let comparisonInfo = '';
+    if (cr.comparison_type === 'peer') {
+      comparisonInfo = `مقارنة مع شرط #${cr.condition_id}`;
+    } else {
+      comparisonInfo = 'مقارنة مع قاعدة البيانات';
+    }
+
+    return `
+      <tr>
+        <td><strong>${cr.order_index}.</strong> ${cr.condition_name}</td>
+        <td class="${statusClass}">${statusIcon} ${statusText}</td>
+        <td style="font-family:monospace; direction:ltr;">${cr.extracted_value || 'N/A'}</td>
+        <td style="font-family:monospace; direction:ltr;">${cr.expected_value || 'N/A'}</td>
+        <td style="font-size:11px; color:rgba(255,255,255,0.7);">${comparisonInfo}</td>
+      </tr>
+    `;
+  }).join('');
+
+  detail.innerHTML = `
+    <div class="detail-row">
+      <span class="detail-label">السيريال الكامل:</span>
+      <span class="detail-value" style="direction:ltr;">${serial}</span>
+    </div>
+    <div class="detail-row">
+      <span class="detail-label">QR Code:</span>
+      <span class="detail-value" style="direction:ltr;">${qr}</span>
+    </div>
+    <div class="detail-row">
+      <span class="detail-label">المحطة:</span>
+      <span class="detail-value">${currentStation.name}</span>
+    </div>
+    <div style="margin-top:12px;">
+      <table class="condition-results">
+        <thead>
+          <tr>
+            <th>الشرط</th>
+            <th>النتيجة</th>
+            <th>القيمة المستخرجة</th>
+            <th>القيمة المتوقعة</th>
+            <th>النوع</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+document.getElementById('resultCloseBtn').addEventListener('click', () => {
+  document.getElementById('resultOverlay').classList.remove('show');
+  // Clear inputs for next scan
+  document.getElementById('serialInput').value = '';
+  document.getElementById('qrInput').value = '';
+  document.getElementById('serialExtractPreview').style.display = 'none';
+  document.getElementById('qrExtractPreview').style.display = 'none';
+  document.getElementById('serialInput').focus();
+});
+
+// =========================================================
+// Statistics
+// =========================================================
+async function loadTodayStats() {
+  const today = new Date().toISOString().split('T')[0];
+
+  try {
+    const { data, error } = await sbClient
+      .from('comparison_logs')
+      .select('result')
+      .eq('performed_by', currentUser.id)
+      .gte('created_at', today + 'T00:00:00')
+      .lte('created_at', today + 'T23:59:59');
+
+    if (error) throw error;
+
+    todayStats = { total: 0, ok: 0, ng: 0 };
+    (data || []).forEach(log => {
+      todayStats.total++;
+      if (log.result === 'ok') todayStats.ok++;
+      else if (log.result === 'ng') todayStats.ng++;
+    });
+
+    updateStatsDisplay();
+  } catch (err) {
+    console.warn('فشل تحميل الإحصائيات:', err);
+  }
+}
+
+function updateStats(result) {
+  todayStats.total++;
+  if (result === 'ok') todayStats.ok++;
+  else if (result === 'ng') todayStats.ng++;
+  updateStatsDisplay();
+}
+
+function updateStatsDisplay() {
+  document.getElementById('statTotal').textContent = todayStats.total;
+  document.getElementById('statOk').textContent = todayStats.ok;
+  document.getElementById('statNg').textContent = todayStats.ng;
+}
+
+// =========================================================
+// Recent Logs
+// =========================================================
+async function loadRecentLogs() {
+  const container = document.getElementById('recentLogList');
+  const today = new Date().toISOString().split('T')[0];
+
+  try {
+    const { data, error } = await sbClient
+      .from('comparison_logs')
+      .select('*')
+      .eq('performed_by', currentUser.id)
+      .gte('created_at', today + 'T00:00:00')
+      .order('created_at', { ascending: false })
+      .limit(10);
+
+    if (error) throw error;
+
+    if (!data || data.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state">
+          <div class="icon">📭</div>
+          <div>لا توجد عمليات فحص اليوم</div>
+        </div>
+      `;
+      return;
+    }
+
+    const resultText = { ok: 'OK', ng: 'NG', undefined: 'غير محدد' };
+
+    container.innerHTML = data.map(log => {
+      const scannedVals = Object.entries(log.scanned_values || {})
+        .map(([k, v]) => `${k}:"${v}"`).join(' | ');
+
+      return `
+        <div class="log-row">
+          <div class="log-info">
+            <div class="log-station">🏭 ${log.station_name || 'غير معروف'}</div>
+            <div class="log-serial">${scannedVals}</div>
+          </div>
+          <span class="log-badge ${log.result}">${resultText[log.result] || log.result}</span>
+        </div>
+      `;
+    }).join('');
+
+  } catch (err) {
+    console.warn('فشل تحميل السجل:', err);
+    container.innerHTML = '<div style="color:#64748b; text-align:center; padding:20px;">📴 غير متصل</div>';
+  }
+}
+
+// Enter key handling
+document.getElementById('serialInput').addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') document.getElementById('qrInput').focus();
+});
+document.getElementById('qrInput').addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') runComparison();
+});
+</script>
+</body>
+</html>
