@@ -90,6 +90,7 @@ let currentConditionIndex = 0;
 let scannedValues = {};
 let rawScannedValues = {};
 let rawValuesList = [];
+let cachedReferenceRows = [];
 
 async function init() {
   const auth = await requireAuth();
@@ -148,6 +149,14 @@ async function startStation(station) {
     document.getElementById('mainContent').innerHTML = `<div class="view"><div class="no-station-msg">⚠️ المحطة دي معندهاش شروط مضافة بعد.</div></div>`;
     return;
   }
+
+  // نجيب قاعدة البيانات المرجعية مرة واحدة بس هنا، ونستخدمها من الذاكرة
+  // لكل عمليات السكان اللي جاية (بدل ما نطلبها من السيرفر مع كل منتج)
+  const { data: refRows } = await sbClient
+    .from('comparison_reference_data')
+    .select('*')
+    .eq('station_id', station.id);
+  cachedReferenceRows = refRows || [];
 
   resetScanCycle();
   renderScanView();
@@ -234,10 +243,19 @@ async function resolveAndCompare() {
   const content = document.getElementById('mainContent');
   content.innerHTML = '<div class="view"><div class="no-station-msg">⏳ جاري تحليل القيم ومطابقتها...</div></div>';
 
-  const { data: refRows } = await sbClient
-    .from('comparison_reference_data')
-    .select('*')
-    .eq('station_id', activeStation.id);
+  // نستخدم النسخة المحفوظة في الذاكرة من لما فتحنا المحطة (أسرع بكتير من طلب شبكة جديد)
+  const refRows = cachedReferenceRows;
+  const dbConditionsList = activeConditions.filter(c => c.comparison_type === 'database');
+  const maxPossibleScore = dbConditionsList.length;
+
+  // فهرسة سريعة (Set) لكل شرط قاعدة بيانات: كل القيم الصحيحة الممكنة ليه
+  // بدل ما ندوّر في كل صفوف القاعدة (بحث خطي) في كل مرة، البحث بقى فوري O(1)
+  const conditionValueIndex = {};
+  dbConditionsList.forEach(cond => {
+    conditionValueIndex[cond.order_index] = new Set(
+      refRows.map(r => (r.expected_values || {})[cond.order_index]).filter(v => v !== undefined)
+    );
+  });
 
   const indices = rawValuesList.map((_, idx) => idx);
   const allPerms = permutations(indices);
@@ -245,21 +263,22 @@ async function resolveAndCompare() {
   let bestPerm = allPerms[0];
   let bestScore = -1;
 
-  allPerms.forEach(perm => {
+  for (const perm of allPerms) {
     let score = 0;
     activeConditions.forEach((cond, condIdx) => {
       const rawVal = rawValuesList[perm[condIdx]];
       const extracted = extractValue(rawVal, cond.extract_start, cond.extract_end);
       if (cond.comparison_type === 'database') {
-        const found = (refRows || []).some(r => (r.expected_values || {})[cond.order_index] === extracted);
-        if (found) score++;
+        const indexSet = conditionValueIndex[cond.order_index];
+        if (indexSet && indexSet.has(extracted)) score++;
       }
     });
     if (score > bestScore) {
       bestScore = score;
       bestPerm = perm;
     }
-  });
+    if (bestScore === maxPossibleScore) break; // لقينا توزيع مطابق بالكامل - مفيش داعي نكمل نجرب
+  }
 
   // نبني scannedValues/rawScannedValues بناءً على أفضل توزيع لقينـاه
   scannedValues = {};
