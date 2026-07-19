@@ -195,13 +195,15 @@ tr.row-clickable { cursor: pointer; }
 <h2>📊 تحليل باريتو</h2>
 <div class="pareto-controls">
   <label>تجميع حسب (المحور X):</label>
-  <select id="paretoGroupBy">
-    <option value="stage_name">المحطة</option>
-    <option value="defect_type_name">نوع العيب</option>
-    <option value="technician_email">الفني</option>
-    <option value="status">الحالة</option>
-  </select>
+  <select id="paretoGroupBy"></select>
   <span style="color:#64748b; font-size:12px;">المحور Y: عدد العيوب (تلقائي) + النسبة التراكمية</span>
+</div>
+<div style="color:#94a3b8; font-size:12px; margin-bottom:10px;">💡 دوس على أي عمود في الرسم عشان تفلتر الجدول تحت بيه (ودوس تاني على نفس العمود عشان تشيل الفلتر)</div>
+<div id="paretoActiveFilterWrap" style="display:none; margin-bottom:12px;">
+  <span style="background:#334155; color:#fbbf24; padding:6px 14px; border-radius:20px; font-size:12px; font-weight:bold; display:inline-flex; align-items:center; gap:8px;">
+    🎯 فلتر الباريتو النشط: <span id="paretoActiveFilterLabel"></span>
+    <button id="paretoClearFilterBtn" style="background:#ef4444; color:white; border:none; border-radius:50%; width:18px; height:18px; cursor:pointer; font-size:11px; line-height:1; padding:0;">✕</button>
+  </span>
 </div>
 <div class="pareto-chart-wrap">
   <canvas id="paretoCanvas"></canvas>
@@ -400,6 +402,9 @@ async function loadModelMappingCache() {
 }
 let allDefects = [];
 let supervisorAllowedStageIds = null; // بس للمشرف: المحطات اللي يقدر يعتمد/يرفض عليها
+// فلتر الباريتو التفاعلي: لو المستخدم دوس على عمود في الرسم، الجدول يتفلتر بنفس الفئة دي
+let paretoSelectedGroupBy = null;
+let paretoSelectedValue = null;
 let allSupervisors = [];
 let allTechnicians = [];
 
@@ -415,6 +420,7 @@ async function init() {
   renderPushToggleButton('pushToggleWrap', auth.user.id);
 
   renderTableHeader();
+  populateParetoGroupBySelect();
 
   if (isFullAccess) {
     document.getElementById('stationsBtn').style.display = 'inline-block';
@@ -831,6 +837,11 @@ function getDisplayedDefects() {
     const allowed = columnFilters[colKey];
     list = list.filter(d => allowed.has(col.getValue(d)));
   });
+  // فلتر الباريتو التفاعلي (لو المستخدم دوس على عمود في الرسم)
+  if (paretoSelectedGroupBy && paretoSelectedValue !== null) {
+    const paretoCol = COLUMNS.find(c => c.key === paretoSelectedGroupBy);
+    if (paretoCol) list = list.filter(d => paretoCol.getValue(d) === paretoSelectedValue);
+  }
   return list;
 }
 
@@ -901,19 +912,45 @@ function renderTable() {
 // ============ رسم باريتو التفاعلي ============
 let paretoChartInstance = null;
 
-const paretoLabels = {
-  stage_name: (d) => d.stages ? d.stages.name : (d.stage_name || 'غير محدد'),
-  defect_type_name: (d) => d.defect_type_name || 'غير محدد',
-  technician_email: (d) => d.technician_email || 'غير محدد',
-  status: (d) => statusText[d.status] || d.status || 'غير محدد',
-};
+// قائمة اختيار الباريتو بتتبنى ديناميكيًا من نفس أعمدة الجدول القابلة للتجميع
+// (مفيش قاموس ثابت تاني - أي عمود له getValue وقابل للفلترة يبقى تلقائيًا خيار في الباريتو)
+function populateParetoGroupBySelect() {
+  const select = document.getElementById('paretoGroupBy');
+  const groupableCols = COLUMNS.filter(c => c.getValue && c.filterable !== false);
+  select.innerHTML = groupableCols.map(c => `<option value="${c.key}">${c.label}</option>`).join('');
+}
+
+function updateParetoActiveFilterChip() {
+  const wrap = document.getElementById('paretoActiveFilterWrap');
+  const label = document.getElementById('paretoActiveFilterLabel');
+  if (paretoSelectedGroupBy && paretoSelectedValue !== null) {
+    const col = COLUMNS.find(c => c.key === paretoSelectedGroupBy);
+    label.textContent = `${col ? col.label : paretoSelectedGroupBy}: ${paretoSelectedValue}`;
+    wrap.style.display = 'block';
+  } else {
+    wrap.style.display = 'none';
+  }
+}
+
+function clearParetoFilter() {
+  paretoSelectedGroupBy = null;
+  paretoSelectedValue = null;
+  updateParetoActiveFilterChip();
+  renderTable();
+}
+document.getElementById('paretoClearFilterBtn').addEventListener('click', clearParetoFilter);
 
 function renderParetoChart() {
   const groupBy = document.getElementById('paretoGroupBy').value;
-  const getLabel = paretoLabels[groupBy];
+  const col = COLUMNS.find(c => c.key === groupBy);
+  const getLabel = col ? col.getValue : (d) => 'غير محدد';
   const canvas = document.getElementById('paretoCanvas');
   const emptyMsg = document.getElementById('paretoEmpty');
 
+  updateParetoActiveFilterChip();
+
+  // الباريتو دايمًا بيعرض التوزيع الكامل لكل العيوب المحمّلة (بعد فلتر شريط البحث العلوي)
+  // بغض النظر عن فلتر الباريتو النشط نفسه، عشان تقدر تشوف كل الفئات وتختار منها
   if (!allDefects || allDefects.length === 0) {
     canvas.style.display = 'none';
     emptyMsg.style.display = 'block';
@@ -943,6 +980,12 @@ function renderParetoChart() {
     return +(running / total * 100).toFixed(1);
   });
 
+  // تلوين العمود المختار حاليًا (لو فيه فلتر باريتو نشط بنفس معيار التجميع ده) بلون مختلف
+  const isThisGroupBySelected = paretoSelectedGroupBy === groupBy;
+  const barColors = labels.map(l =>
+    isThisGroupBySelected && paretoSelectedValue === l ? '#f59e0b' : '#3b82f6'
+  );
+
   if (paretoChartInstance) paretoChartInstance.destroy();
 
   paretoChartInstance = new Chart(canvas.getContext('2d'), {
@@ -953,7 +996,7 @@ function renderParetoChart() {
           type: 'bar',
           label: 'عدد العيوب',
           data: values,
-          backgroundColor: '#3b82f6',
+          backgroundColor: barColors,
           yAxisID: 'yCount',
         },
         {
@@ -972,6 +1015,23 @@ function renderParetoChart() {
       responsive: true,
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
+      onHover: (evt, elements) => {
+        canvas.style.cursor = elements.length ? 'pointer' : 'default';
+      },
+      onClick: (evt, elements) => {
+        if (!elements || elements.length === 0) return;
+        const idx = elements[0].index;
+        const clickedLabel = labels[idx];
+        if (paretoSelectedGroupBy === groupBy && paretoSelectedValue === clickedLabel) {
+          // دوس تاني على نفس العمود = شيل الفلتر
+          paretoSelectedGroupBy = null;
+          paretoSelectedValue = null;
+        } else {
+          paretoSelectedGroupBy = groupBy;
+          paretoSelectedValue = clickedLabel;
+        }
+        renderTable();
+      },
       plugins: {
         legend: { labels: { color: '#e2e8f0' } },
       },
@@ -993,7 +1053,12 @@ function renderParetoChart() {
   });
 }
 
-document.getElementById('paretoGroupBy').addEventListener('change', renderParetoChart);
+document.getElementById('paretoGroupBy').addEventListener('change', () => {
+  // لو غيّر معيار التجميع، الفلتر القديم بقى من غير معنى فنشيله
+  paretoSelectedGroupBy = null;
+  paretoSelectedValue = null;
+  renderTable();
+});
 
 // ============ مودال المراجعة التفصيلي (اعتماد/رفض) ============
 const reviewModal = document.getElementById('reviewModal');
@@ -1123,12 +1188,14 @@ document.getElementById('resetFilter').addEventListener('click', () => {
   document.getElementById('filterDateTo').value = '';
   document.getElementById('filterShift').value = '';
   document.getElementById('filterFactory').value = '';
+  paretoSelectedGroupBy = null;
+  paretoSelectedValue = null;
   loadDefects();
 });
 
 // ============ تصدير ============
 document.getElementById('exportBtn').addEventListener('click', () => {
-  const rows = allDefects.map(d => ({
+  const rows = getDisplayedDefects().map(d => ({
     السيريال: d.serial_number,
     الجوب_أوردر: d.job_order || '',
     المحطة: d.stages ? d.stages.name : '',
