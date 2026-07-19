@@ -150,16 +150,25 @@ async function startStation(station) {
     return;
   }
 
-  // نجيب قاعدة البيانات المرجعية مرة واحدة بس هنا، ونستخدمها من الذاكرة
-  // لكل عمليات السكان اللي جاية (بدل ما نطلبها من السيرفر مع كل منتج)
-  const { data: refRows } = await sbClient
-    .from('comparison_reference_data')
-    .select('*')
-    .eq('station_id', station.id);
-  cachedReferenceRows = refRows || [];
+  // نعرض النسخة المحفوظة محليًا فورًا (لو موجودة) - صفرية الانتظار
+  cachedReferenceRows = getCachedComparisonReferenceData(station.id);
 
   resetScanCycle();
   renderScanView();
+
+  // بعد كده، نحدّثها من السيرفر في الخلفية من غير ما نعطّل الفني
+  try {
+    const { data: refRows, error } = await sbClient
+      .from('comparison_reference_data')
+      .select('*')
+      .eq('station_id', station.id);
+    if (!error) {
+      cachedReferenceRows = refRows || [];
+      cacheComparisonReferenceData(station.id, cachedReferenceRows);
+    }
+  } catch (err) {
+    console.warn('فشل تحديث قاعدة البيانات المرجعية من السيرفر، هنستمر بالنسخة المحفوظة محليًا:', err);
+  }
 }
 
 function resetScanCycle() {
@@ -201,7 +210,7 @@ function renderScanView() {
 
   document.getElementById('openCameraBtn').addEventListener('click', () => {
     scannerModal.classList.add('open');
-    currentScanner = startBarcodeScanner('scannerContainer', (decodedText) => {
+    currentScanner = startCombinedScanner('scannerContainer', (decodedText) => {
       closeScannerModal();
       handleScanValue(decodedText);
     }, (err) => console.error('Scanner error:', err));
