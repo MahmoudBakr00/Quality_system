@@ -13,6 +13,7 @@
 <title>سجل المقارنات - نظام تسجيل العيوب</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
 body { background: #0f172a; padding: 20px; color: #f1f5f9; }
@@ -77,15 +78,40 @@ td { padding: 8px; text-align: center; border-bottom: 1px solid #334155; }
     <option value="undefined">⚠️ غير معرّف</option>
   </select>
   <input type="text" id="logFilterUser" placeholder="بحث بالمستخدم" />
+  <input type="text" id="logFilterInput" placeholder="بحث في القيم المسكونة" />
   <button class="small-btn" id="applyLogFilter">🔍 تصفية</button>
   <button class="small-btn" id="resetLogFilter" style="background:#64748b;">↺ إعادة تعيين</button>
+  <button class="small-btn" id="exportLogsBtn" style="background:#16a34a;">⬇ تصدير CSV</button>
+  <button class="small-btn danger" id="deleteSelectedLogsBtn" style="display:none;">🗑 حذف المحدد</button>
 </div>
+
+<div class="pareto-controls" style="display:flex; align-items:center; gap:10px; margin:14px 0; flex-wrap:wrap;">
+  <label style="color:#94a3b8; font-size:13px;">📊 باريتو - تجميع حسب:</label>
+  <select id="logsParetoGroupBy">
+    <option value="station_name">المحطة</option>
+    <option value="result">النتيجة</option>
+    <option value="performed_by_email">المستخدم</option>
+  </select>
+</div>
+<div style="color:#94a3b8; font-size:12px; margin-bottom:10px;">💡 دوس على أي عمود في الرسم عشان تفلتر الجدول تحت بيه (ودوس تاني على نفس العمود عشان تشيل الفلتر)</div>
+<div id="logsParetoActiveFilterWrap" style="display:none; margin-bottom:12px;">
+  <span style="background:#334155; color:#fbbf24; padding:6px 14px; border-radius:20px; font-size:12px; font-weight:bold; display:inline-flex; align-items:center; gap:8px;">
+    🎯 فلتر الباريتو النشط: <span id="logsParetoActiveFilterLabel"></span>
+    <button id="logsParetoClearFilterBtn" style="background:#ef4444; color:white; border:none; border-radius:50%; width:18px; height:18px; cursor:pointer; font-size:11px; line-height:1; padding:0;">✕</button>
+  </span>
+</div>
+<div style="position:relative; height:280px; margin-bottom:20px;">
+  <canvas id="logsParetoCanvas"></canvas>
+  <div id="logsParetoEmpty" style="display:none; text-align:center; color:#64748b; padding:40px;">📭 لا توجد بيانات كافية للرسم</div>
+</div>
+
 <div style="overflow-x:auto;">
 <table>
 <thead><tr>
+  <th id="logsCheckboxHeaderCell" style="display:none;"><input type="checkbox" id="logsSelectAllCheckbox" /></th>
   <th>المحطة</th><th>القيم المسكونة</th><th>النتيجة</th><th>تفاصيل</th><th>المستخدم</th><th>التاريخ</th>
 </tr></thead>
-<tbody id="logsTbody"><tr><td colspan="6">⏳ جاري التحميل...</td></tr></tbody>
+<tbody id="logsTbody"><tr><td colspan="7">⏳ جاري التحميل...</td></tr></tbody>
 </table>
 </div>
 </div>
@@ -113,6 +139,7 @@ let currentUser = null;
 let currentRole = null;
 let isFullAccess = false;
 let allStationsCache = [];
+let currentLogsCache = [];
 
 async function init() {
   const auth = await requireAuth();
@@ -125,6 +152,8 @@ async function init() {
 
   if (isFullAccess) {
     document.getElementById('stationsTabBtn').style.display = 'inline-block';
+    document.getElementById('logsCheckboxHeaderCell').style.display = 'table-cell';
+    document.getElementById('deleteSelectedLogsBtn').style.display = 'inline-block';
   }
 
   loadStationsForFilter();
@@ -154,13 +183,18 @@ async function loadStationsForFilter() {
   });
 }
 
+// فلتر الباريتو التفاعلي لسجل المقارنات
+let logsParetoSelectedGroupBy = null;
+let logsParetoSelectedValue = null;
+
 async function loadLogs() {
   const tbody = document.getElementById('logsTbody');
-  tbody.innerHTML = '<tr><td colspan="6">⏳ جاري التحميل...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="7">⏳ جاري التحميل...</td></tr>';
 
   const stationId = document.getElementById('logFilterStation').value;
   const result = document.getElementById('logFilterResult').value;
   const userSearch = document.getElementById('logFilterUser').value.trim();
+  const inputSearch = document.getElementById('logFilterInput').value.trim().toLowerCase();
 
   let query = sbClient.from('comparison_logs').select('*').order('created_at', { ascending: false }).limit(500);
   if (stationId) query = query.eq('station_id', stationId);
@@ -168,14 +202,53 @@ async function loadLogs() {
   if (userSearch) query = query.ilike('performed_by_email', `%${userSearch}%`);
 
   const { data, error } = await query;
-  if (error || !data || data.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6">📭 لا توجد نتائج</td></tr>';
+  let logs = data || [];
+
+  // فلتر البحث في القيم المسكونة (بنفلتره على الناتج، لأنه جوه JSONB)
+  if (inputSearch) {
+    logs = logs.filter(log =>
+      Object.values(log.scanned_values || {}).some(v => String(v).toLowerCase().includes(inputSearch))
+    );
+  }
+
+  currentLogsCache = logs;
+  // تحميل بيانات جديدة = الفلتر القديم بتاع الباريتو بقى من غير معنى
+  logsParetoSelectedGroupBy = null;
+  logsParetoSelectedValue = null;
+
+  if (error) {
+    tbody.innerHTML = '<tr><td colspan="7">❌ حدث خطأ أثناء التحميل</td></tr>';
+    renderLogsParetoChart();
+    return;
+  }
+
+  renderLogsTable();
+  renderLogsParetoChart();
+}
+
+// فلتر الباريتو بيتطبق على الجدول فقط، مش على الرسم نفسه (عشان تفضل تقدر تشوف كل الفئات)
+function getDisplayedLogs() {
+  let list = currentLogsCache;
+  if (logsParetoSelectedGroupBy && logsParetoSelectedValue !== null) {
+    const getLabel = logsParetoLabels[logsParetoSelectedGroupBy];
+    if (getLabel) list = list.filter(log => getLabel(log) === logsParetoSelectedValue);
+  }
+  return list;
+}
+
+function renderLogsTable() {
+  const tbody = document.getElementById('logsTbody');
+  const displayedLogs = getDisplayedLogs();
+
+  if (displayedLogs.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7">📭 لا توجد نتائج</td></tr>';
     return;
   }
 
   const resultText = { ok: '✅ مطابق', ng: '❌ غير مطابق', undefined: '⚠️ غير معرّف' };
-  tbody.innerHTML = data.map(log => `
+  tbody.innerHTML = displayedLogs.map(log => `
     <tr>
+      ${isFullAccess ? `<td onclick="event.stopPropagation()"><input type="checkbox" class="log-row-checkbox" data-id="${log.id}" /></td>` : ''}
       <td>${log.station_name || '-'}</td>
       <td style="font-size:11px; text-align:right;">${Object.values(log.scanned_values || {}).join(' | ')}</td>
       <td><span class="result-badge ${log.result}">${resultText[log.result]}</span></td>
@@ -186,11 +259,159 @@ async function loadLogs() {
   `).join('');
 }
 
+document.getElementById('logsSelectAllCheckbox')?.addEventListener('change', (e) => {
+  document.querySelectorAll('.log-row-checkbox').forEach(cb => { cb.checked = e.target.checked; });
+});
+
+document.getElementById('deleteSelectedLogsBtn').addEventListener('click', async () => {
+  const selected = Array.from(document.querySelectorAll('.log-row-checkbox:checked')).map(cb => cb.dataset.id);
+  if (selected.length === 0) { alert('⚠️ اختر سجل واحد على الأقل'); return; }
+  if (!confirm(`هل أنت متأكد من حذف ${selected.length} سجل مقارنة؟ لا يمكن التراجع.`)) return;
+
+  const btn = document.getElementById('deleteSelectedLogsBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ جاري الحذف...';
+  const { error } = await sbClient.from('comparison_logs').delete().in('id', selected);
+  btn.disabled = false;
+  btn.textContent = '🗑 حذف المحدد';
+
+  if (error) { alert('❌ فشل الحذف: ' + error.message); return; }
+  loadLogs();
+});
+
+// ============ باريتو سجل المقارنات ============
+let logsParetoChartInstance = null;
+const logsParetoLabels = {
+  station_name: (log) => log.station_name || 'غير محدد',
+  result: (log) => ({ ok: '✅ مطابق', ng: '❌ غير مطابق', undefined: '⚠️ غير معرّف' })[log.result] || log.result,
+  performed_by_email: (log) => log.performed_by_email ? log.performed_by_email.split('@')[0] : 'غير محدد',
+};
+
+function updateLogsParetoActiveFilterChip() {
+  const wrap = document.getElementById('logsParetoActiveFilterWrap');
+  const label = document.getElementById('logsParetoActiveFilterLabel');
+  if (logsParetoSelectedGroupBy && logsParetoSelectedValue !== null) {
+    const groupByLabels = { station_name: 'المحطة', result: 'النتيجة', performed_by_email: 'المستخدم' };
+    label.textContent = `${groupByLabels[logsParetoSelectedGroupBy] || logsParetoSelectedGroupBy}: ${logsParetoSelectedValue}`;
+    wrap.style.display = 'block';
+  } else {
+    wrap.style.display = 'none';
+  }
+}
+
+document.getElementById('logsParetoClearFilterBtn').addEventListener('click', () => {
+  logsParetoSelectedGroupBy = null;
+  logsParetoSelectedValue = null;
+  updateLogsParetoActiveFilterChip();
+  renderLogsTable();
+});
+
+function renderLogsParetoChart() {
+  const groupBy = document.getElementById('logsParetoGroupBy').value;
+  const getLabel = logsParetoLabels[groupBy];
+  const canvas = document.getElementById('logsParetoCanvas');
+  const emptyMsg = document.getElementById('logsParetoEmpty');
+
+  updateLogsParetoActiveFilterChip();
+
+  // الرسم دايمًا بيعرض التوزيع الكامل (بعد فلتر شريط البحث فوق)، وفلتر الباريتو بيتطبق على الجدول بس
+  if (!currentLogsCache || currentLogsCache.length === 0) {
+    canvas.style.display = 'none';
+    emptyMsg.style.display = 'block';
+    if (logsParetoChartInstance) { logsParetoChartInstance.destroy(); logsParetoChartInstance = null; }
+    return;
+  }
+  canvas.style.display = 'block';
+  emptyMsg.style.display = 'none';
+
+  const counts = {};
+  currentLogsCache.forEach(log => {
+    const key = getLabel(log);
+    counts[key] = (counts[key] || 0) + 1;
+  });
+
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const labels = sorted.map(([k]) => k);
+  const values = sorted.map(([, v]) => v);
+  const total = values.reduce((a, b) => a + b, 0);
+
+  let running = 0;
+  const cumulative = values.map(v => { running += v; return +((running / total) * 100).toFixed(1); });
+
+  // تلوين العمود المختار حاليًا بلون مختلف لو الفلتر النشط بنفس معيار التجميع ده
+  const isThisGroupBySelected = logsParetoSelectedGroupBy === groupBy;
+  const barColors = labels.map(l =>
+    isThisGroupBySelected && logsParetoSelectedValue === l ? '#f59e0b' : '#3b82f6'
+  );
+
+  if (logsParetoChartInstance) logsParetoChartInstance.destroy();
+  logsParetoChartInstance = new Chart(canvas, {
+    data: {
+      labels,
+      datasets: [
+        { type: 'bar', label: 'عدد العمليات', data: values, backgroundColor: barColors, order: 2 },
+        { type: 'line', label: 'النسبة التراكمية %', data: cumulative, borderColor: '#fbbf24', backgroundColor: '#fbbf24', yAxisID: 'y1', order: 1, tension: 0.2 },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      onHover: (evt, elements) => {
+        canvas.style.cursor = elements.length ? 'pointer' : 'default';
+      },
+      onClick: (evt, elements) => {
+        if (!elements || elements.length === 0) return;
+        const idx = elements[0].index;
+        const clickedLabel = labels[idx];
+        if (logsParetoSelectedGroupBy === groupBy && logsParetoSelectedValue === clickedLabel) {
+          logsParetoSelectedGroupBy = null;
+          logsParetoSelectedValue = null;
+        } else {
+          logsParetoSelectedGroupBy = groupBy;
+          logsParetoSelectedValue = clickedLabel;
+        }
+        updateLogsParetoActiveFilterChip();
+        renderLogsTable();
+      },
+      scales: {
+        y: { beginAtZero: true, ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
+        y1: { beginAtZero: true, max: 100, position: 'right', ticks: { color: '#fbbf24' }, grid: { display: false } },
+        x: { ticks: { color: '#94a3b8' }, grid: { display: false } },
+      },
+      plugins: { legend: { labels: { color: '#f1f5f9' } } },
+    },
+  });
+}
+document.getElementById('logsParetoGroupBy').addEventListener('change', () => {
+  // لو غيّر معيار التجميع، الفلتر القديم بقى من غير معنى
+  logsParetoSelectedGroupBy = null;
+  logsParetoSelectedValue = null;
+  updateLogsParetoActiveFilterChip();
+  renderLogsTable();
+});
+
+// ============ تصدير CSV ============
+document.getElementById('exportLogsBtn').addEventListener('click', () => {
+  const displayedLogs = getDisplayedLogs();
+  if (!displayedLogs || displayedLogs.length === 0) { alert('⚠️ لا توجد بيانات للتصدير'); return; }
+  const resultText = { ok: 'مطابق', ng: 'غير مطابق', undefined: 'غير معرف' };
+  const rows = displayedLogs.map(log => ({
+    المحطة: log.station_name || '-',
+    'القيم المسكونة': Object.values(log.scanned_values || {}).join(' | '),
+    النتيجة: resultText[log.result] || log.result,
+    التفاصيل: log.mismatch_details || '-',
+    المستخدم: log.performed_by_email || '-',
+    التاريخ: formatDate(log.created_at),
+  }));
+  exportToCSV('سجل_المقارنات.csv', rows);
+});
+
 document.getElementById('applyLogFilter').addEventListener('click', loadLogs);
 document.getElementById('resetLogFilter').addEventListener('click', () => {
   document.getElementById('logFilterStation').value = '';
   document.getElementById('logFilterResult').value = '';
   document.getElementById('logFilterUser').value = '';
+  document.getElementById('logFilterInput').value = '';
   loadLogs();
 });
 
