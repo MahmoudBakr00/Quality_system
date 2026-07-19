@@ -255,6 +255,23 @@ function startQrScanner(containerId, onResult, onError) {
   return startScanner(containerId, [Html5QrcodeSupportedFormats.QR_CODE], onResult, onError);
 }
 
+// سكان باركود + QR مع بعض في نفس الوقت (للمحطات اللي محتاجة تقرا أي نوع)
+function startCombinedScanner(containerId, onResult, onError) {
+  const formatsToSupport = [
+    Html5QrcodeSupportedFormats.QR_CODE,
+    Html5QrcodeSupportedFormats.CODE_128,
+    Html5QrcodeSupportedFormats.CODE_39,
+    Html5QrcodeSupportedFormats.CODE_93,
+    Html5QrcodeSupportedFormats.CODABAR,
+    Html5QrcodeSupportedFormats.EAN_13,
+    Html5QrcodeSupportedFormats.EAN_8,
+    Html5QrcodeSupportedFormats.ITF,
+    Html5QrcodeSupportedFormats.UPC_A,
+    Html5QrcodeSupportedFormats.UPC_E,
+  ];
+  return startScanner(containerId, formatsToSupport, onResult, onError);
+}
+
 // =========================================================
 // تصدير مصفوفة من الكائنات كـ CSV وتنزيلها
 // =========================================================
@@ -721,6 +738,22 @@ function getShiftLabel(createdAt) {
 }
 function getShiftText(shift) {
   return shift === 'day' ? '☀️ نهار' : '🌙 ليل';
+}
+
+const CACHE_COMPARISON_REF_KEY = 'cached_comparison_reference';
+
+function cacheComparisonReferenceData(stationId, rows) {
+  try {
+    const all = JSON.parse(localStorage.getItem(CACHE_COMPARISON_REF_KEY) || '{}');
+    all[stationId] = rows;
+    localStorage.setItem(CACHE_COMPARISON_REF_KEY, JSON.stringify(all));
+  } catch (e) { console.warn('فشل تخزين قاعدة البيانات المرجعية محليًا:', e); }
+}
+function getCachedComparisonReferenceData(stationId) {
+  try {
+    const all = JSON.parse(localStorage.getItem(CACHE_COMPARISON_REF_KEY) || '{}');
+    return all[stationId] || [];
+  } catch (e) { return []; }
 }
 
 function getRememberedEmail() {
