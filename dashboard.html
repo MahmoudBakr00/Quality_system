@@ -1239,6 +1239,24 @@ document.getElementById('exportZipBtn').addEventListener('click', async () => {
       اسم_ملف_الصورة: '',
     }));
 
+    // نفس البيانات لكن بمفاتيح إنجليزية وتاريخ خام (ISO) - عشان أي أتمتة زي Power Automate
+    // تقرأها بسهولة من غير مشاكل تنسيق إكسيل أو حروف عربي في أسماء الحقول
+    const jsonRows = displayedDefects.map(d => ({
+      serial_number: d.serial_number,
+      defect_code: d.defect_code || '',
+      job_order: d.job_order || '',
+      station_name: d.stages ? d.stages.name : '',
+      defect_type_name: d.defect_type_name || '',
+      description: d.description || '',
+      status: d.status,
+      status_text: statusText[d.status] || d.status,
+      technician_email: d.technician_email || '',
+      reviewed_by_email: d.reviewed_by_email || '',
+      created_at: d.created_at,
+      created_at_display: formatDate(d.created_at),
+      photo_file_name: '',
+    }));
+
     const withPhotos = displayedDefects
       .map((d, i) => ({ d, rowIndex: i }))
       .filter(x => x.d.photo_url);
@@ -1284,6 +1302,7 @@ document.getElementById('exportZipBtn').addEventListener('click', async () => {
 
           photosFolder.file(fileName, blob);
           rows[rowIndex].اسم_ملف_الصورة = fileName;
+          jsonRows[rowIndex].photo_file_name = fileName;
         } catch (err) {
           failed++;
           console.warn('فشل تحميل صورة العيب', d.id, err);
@@ -1301,6 +1320,9 @@ document.getElementById('exportZipBtn').addEventListener('click', async () => {
     XLSX.utils.book_append_sheet(workbook, worksheet, 'العيوب');
     const excelArrayBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
     zip.file('بيانات_العيوب.xlsx', excelArrayBuffer);
+
+    // ملف JSON (data.json) لنفس البيانات - مخصص للأتمتة (زي Power Automate)
+    zip.file('data.json', JSON.stringify(jsonRows, null, 2));
 
     btn.textContent = '⏳ جاري ضغط الملف...';
     const zipBlob = await zip.generateAsync({ type: 'blob' });
