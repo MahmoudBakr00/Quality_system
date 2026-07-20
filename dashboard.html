@@ -13,6 +13,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
 body { background: #0f172a; padding: 20px; color: #f1f5f9; }
@@ -33,6 +34,7 @@ body { background: #0f172a; padding: 20px; color: #f1f5f9; }
 .filter-bar button.reset-btn:hover { background: #475569; }
 .filter-bar button.export-btn { background: #22c55e; }
 .filter-bar button.export-btn:hover { background: #16a34a; }
+.filter-bar button#exportZipBtn:hover { background: #7c3aed; }
 .filter-bar button.delete-btn { background: #ef4444; }
 .filter-bar button.delete-btn:hover { background: #dc2626; }
 
@@ -181,6 +183,7 @@ tr.row-clickable { cursor: pointer; }
 <button id="applyFilter" data-i18n="filter_btn">🔍 تصفية</button>
 <button class="reset-btn" id="resetFilter" data-i18n="reset_btn">↺ إعادة تعيين</button>
 <button class="export-btn" id="exportBtn" data-i18n="export_btn">⬇ تصدير</button>
+<button class="export-btn" id="exportZipBtn" style="background:#8b5cf6;">🖼️ تصدير مع الصور (ZIP)</button>
 <button class="delete-btn" id="deleteSelectedBtn" style="display:none;" data-i18n="delete_selected">🗑 حذف المحدد</button>
 <button class="approve-btn" id="bulkApproveBtn" style="display:none; background:#22c55e; color:white; border:none; padding:8px 20px; border-radius:6px; cursor:pointer; font-size:13px; font-weight:bold;">✔ اعتماد المحدد</button>
 <button class="reject-btn" id="bulkRejectBtn" style="display:none; background:#ef4444; color:white; border:none; padding:8px 20px; border-radius:6px; cursor:pointer; font-size:13px; font-weight:bold;">✖ رفض المحدد</button>
@@ -1206,6 +1209,118 @@ document.getElementById('exportBtn').addEventListener('click', () => {
     التاريخ: formatDate(d.created_at),
   }));
   exportToCSV('defects_export.csv', rows);
+});
+
+// ============ تصدير ZIP: إكسيل بالبيانات + فولدر منفصل للصور ============
+document.getElementById('exportZipBtn').addEventListener('click', async () => {
+  const displayedDefects = getDisplayedDefects();
+  if (displayedDefects.length === 0) { alert('⚠️ لا توجد بيانات للتصدير'); return; }
+
+  const btn = document.getElementById('exportZipBtn');
+  const originalText = btn.textContent;
+  btn.disabled = true;
+
+  try {
+    const zip = new JSZip();
+    const photosFolder = zip.folder('photos');
+
+    // صفوف بيانات الإكسيل - عمود "اسم ملف الصورة" بيتربط بالصورة في فولدر photos
+    const rows = displayedDefects.map(d => ({
+      السيريال: d.serial_number,
+      كود_العيب: d.defect_code || '',
+      الجوب_أوردر: d.job_order || '',
+      المحطة: d.stages ? d.stages.name : '',
+      نوع_العيب: d.defect_type_name || '',
+      الوصف: d.description || '',
+      الحالة: statusText[d.status] || d.status,
+      الفني: d.technician_email || '',
+      راجعه: d.reviewed_by_email || '',
+      التاريخ: formatDate(d.created_at),
+      اسم_ملف_الصورة: '',
+    }));
+
+    const withPhotos = displayedDefects
+      .map((d, i) => ({ d, rowIndex: i }))
+      .filter(x => x.d.photo_url);
+
+    const usedNames = new Set();
+    let done = 0;
+    let failed = 0;
+    const total = withPhotos.length;
+
+    if (total === 0) {
+      btn.textContent = '⏳ لا يوجد صور، جاري تجهيز الإكسيل...';
+    } else {
+      btn.textContent = `⏳ 0 / ${total} صورة...`;
+    }
+
+    // تحميل الصور بالتوازي (5 في نفس الوقت) عشان منستناش صورة صورة
+    const CONCURRENCY = 5;
+    let cursor = 0;
+    async function worker() {
+      while (cursor < withPhotos.length) {
+        const myIndex = cursor++;
+        const { d, rowIndex } = withPhotos[myIndex];
+        try {
+          const res = await fetch(d.photo_url);
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          const blob = await res.blob();
+
+          let ext = 'jpg';
+          const urlExtMatch = d.photo_url.split('?')[0].match(/\.(\w+)$/);
+          if (urlExtMatch) ext = urlExtMatch[1];
+          else if (blob.type.includes('png')) ext = 'png';
+          else if (blob.type.includes('webp')) ext = 'webp';
+
+          const baseNameRaw = d.defect_code || d.serial_number || ('defect_' + d.id);
+          const baseName = String(baseNameRaw).replace(/[\\/:*?"<>|]/g, '_');
+          let fileName = `${baseName}.${ext}`;
+          let counter = 2;
+          while (usedNames.has(fileName)) {
+            fileName = `${baseName}_${counter}.${ext}`;
+            counter++;
+          }
+          usedNames.add(fileName);
+
+          photosFolder.file(fileName, blob);
+          rows[rowIndex].اسم_ملف_الصورة = fileName;
+        } catch (err) {
+          failed++;
+          console.warn('فشل تحميل صورة العيب', d.id, err);
+        } finally {
+          done++;
+          btn.textContent = `⏳ ${done} / ${total} صورة...`;
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, Math.max(total, 1)) }, worker));
+
+    btn.textContent = '⏳ جاري تجهيز ملف الإكسيل...';
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'العيوب');
+    const excelArrayBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+    zip.file('بيانات_العيوب.xlsx', excelArrayBuffer);
+
+    btn.textContent = '⏳ جاري ضغط الملف...';
+    const zipBlob = await zip.generateAsync({ type: 'blob' });
+
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(zipBlob);
+    link.download = `تصدير_العيوب_${dateStamp}.zip`;
+    link.click();
+
+    if (failed > 0) {
+      alert(`✅ تم التصدير. لكن فشل تحميل ${failed} صورة من أصل ${total} (ممكن يكون الرابط قديم أو محذوف) — باقي البيانات والصور اتصدّرت عادي.`);
+    }
+  } catch (err) {
+    alert('❌ فشل التصدير: ' + err.message);
+    console.error(err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
 });
 
 // ============ تحديد الكل وحذف ============
