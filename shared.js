@@ -458,6 +458,39 @@ async function syncPendingDefects() {
   }
 }
 
+// فلترة موحّدة لقائمة المحطات حسب دور وتخصيص المستخدم الحالي
+// دي نفس الفلترة اللي بتستخدمها كل الأماكن اللي بتحفظ نسخة أوفلاين من المحطات
+// (register-defect.html + الدالتين تحت) عشان النتيجة تبقى واحدة مهما مين نفّذ أول
+// ومتحصلش مشكلة "سباق" (race condition) بين أكتر من دالة بتكتب في نفس مكان التخزين
+async function getFilteredStagesForUser(allStages) {
+  try {
+    const { data: { user } } = await sbClient.auth.getUser();
+    if (!user) return allStages;
+
+    const role = localStorage.getItem(CACHED_ROLE_KEY);
+    if (role !== 'technician' && role !== 'supervisor') return allStages;
+
+    const { data: assignments } = await sbClient
+      .from('station_technicians')
+      .select('stage_id')
+      .eq('technician_id', user.id);
+    const assignedIds = new Set((assignments || []).map(a => a.stage_id));
+
+    if (role === 'technician') {
+      // الفني: مقيّد دايمًا - المحطات المفتوحة للكل أو المخصصة له بالاسم
+      return allStages.filter(s => s.technicians_open_to_all || assignedIds.has(s.id));
+    }
+    // المشرف: لو عنده تخصيصات محددة فعلاً يتقيد بيها، لو مفيش تخصيصات يشوف الكل
+    if (assignedIds.size > 0) {
+      return allStages.filter(s => assignedIds.has(s.id));
+    }
+    return allStages;
+  } catch (e) {
+    console.warn('فشل تحديد المحطات المسموحة للمستخدم، هنرجع القائمة الكاملة كحل احتياطي:', e);
+    return allStages;
+  }
+}
+
 // يحفظ نسخة من المحطات/أنواع العيوب محليًا كل ما نجحنا نجيبها أونلاين
 // عشان تفضل متاحة حتى لو النت اتقطع بعد كده
 function cacheStages(stages) {
@@ -494,7 +527,10 @@ async function syncAllDataForOffline() {
       sbClient.from('defects').select('*, stages(name, line_no)').order('created_at', { ascending: false }),
     ]);
 
-    if (!stagesRes.error) cacheStages(stagesRes.data);
+    if (!stagesRes.error) {
+      const filteredStages = await getFilteredStagesForUser(stagesRes.data);
+      cacheStages(filteredStages);
+    }
 
     if (!defectTypesRes.error) {
       const grouped = {};
@@ -531,7 +567,10 @@ async function syncFormDataForOffline() {
       sbClient.from('defect_types').select('*'),
     ]);
 
-    if (!stagesRes.error) cacheStages(stagesRes.data);
+    if (!stagesRes.error) {
+      const filteredStages = await getFilteredStagesForUser(stagesRes.data);
+      cacheStages(filteredStages);
+    }
 
     if (!defectTypesRes.error) {
       const grouped = {};
