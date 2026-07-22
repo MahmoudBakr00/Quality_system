@@ -217,27 +217,10 @@ async function loadStages() {
     const { data, error } = await sbClient.from('stages').select('*').order('name');
     if (error) throw error;
 
-    let allowedStages = data;
-
-    if (currentRole === 'technician' || currentRole === 'supervisor') {
-      // الفني والمشرف: نجيب المحطات المخصصة له (نفس جدول التخصيص المستخدم للفنيين)
-      const { data: assignments } = await sbClient
-        .from('station_technicians')
-        .select('stage_id')
-        .eq('technician_id', currentUser.id);
-      const assignedIds = new Set((assignments || []).map(a => a.stage_id));
-
-      if (currentRole === 'technician') {
-        // الفني: مقيّد دايمًا - يشوف المحطات المفتوحة للكل أو المخصصة له بالاسم
-        allowedStages = data.filter(s => s.technicians_open_to_all || assignedIds.has(s.id));
-      } else if (assignedIds.size > 0) {
-        // المشرف: لو عنده تخصيصات محددة فعلاً، يتقيد بيها بس
-        allowedStages = data.filter(s => assignedIds.has(s.id));
-      }
-      // لو المشرف مفيهوش أي تخصيص محطات مسجل خالص، allowedStages تفضل زي ما هي (كل المحطات)
-      // عشان منقفلش عليه الشغل بالغلط لو حد نسي يخصصله محطة
-    }
-    // الأدمن والمشرف العام يقدروا يسجلوا عيوب لأي محطة من غير تقييد دايمًا
+    // فلترة موحّدة (نفس الدالة المستخدمة في shared.js عند حفظ نسخة أوفلاين)
+    // عشان منحصلش على نتيجة مختلفة هنا عن اللي بيتحفظ للعمل بدون نت
+    let allowedStages = await getFilteredStagesForUser(data);
+    // الأدمن والمشرف العام يقدروا يسجلوا عيوب لأي محطة من غير تقييد دايمًا (الدالة بتراعي ده تلقائيًا)
 
     cacheStages(allowedStages);
     renderStagesOptions(allowedStages);
