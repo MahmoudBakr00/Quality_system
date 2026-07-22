@@ -45,6 +45,9 @@ body { background: #0f172a; padding: 20px; color: #f1f5f9; }
 .user-card .role-edit select { padding: 6px 10px; border: none; border-radius: 6px; background: #1e293b; color: #f1f5f9; font-size: 12px; }
 .save-role-btn { background: #3b82f6; color: white; border: none; padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 11px; font-weight: bold; }
 .save-role-btn:hover { background: #2563eb; }
+.delete-user-btn { background: #ef4444; color: white; border: none; padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 11px; font-weight: bold; }
+.delete-user-btn:hover { background: #dc2626; }
+.delete-user-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .role-tag { padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: bold; }
 .role-tag.admin { background: #8b5cf6; color: white; }
 .role-tag.supervisor { background: #3b82f6; color: white; }
@@ -145,6 +148,7 @@ async function loadUsers() {
           <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>${t('role_admin')} (مهندس)</option>
         </select>
         ${currentRole === 'admin' ? `<button class="save-role-btn" data-user-id="${u.id}">💾 حفظ</button>` : '<span style="color:#64748b; font-size:11px;">🔒 الأدمن بس يقدر يعدّل</span>'}
+        ${currentRole === 'admin' && !isCurrent ? `<button class="delete-user-btn" data-user-id="${u.id}" data-user-email="${u.email || ''}">🗑 حذف</button>` : ''}
       </div>
     `;
     container.appendChild(div);
@@ -173,6 +177,36 @@ async function loadUsers() {
       loadUsers();
     });
   });
+
+  container.querySelectorAll('.delete-user-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const userId = btn.dataset.userId;
+      const userEmail = btn.dataset.userEmail;
+
+      if (!confirm(`⚠️ هل أنت متأكد من حذف الحساب "${userEmail}" نهائيًا؟\n\nهذا الإجراء لا يمكن التراجع عنه، والمستخدم لن يقدر يسجل دخول تاني.`)) return;
+      // تأكيد ثاني للحذف النهائي - حماية إضافية من ضغطة غير مقصودة
+      if (!confirm('تأكيد أخير: متأكد إنك عايز تحذف الحساب ده فعلاً؟')) return;
+
+      btn.disabled = true;
+      btn.textContent = '⏳ جاري الحذف...';
+
+      try {
+        const { data: sessionData } = await sbClient.auth.getSession();
+        const { data, error } = await sbClient.functions.invoke('manage-user', {
+          body: { action: 'delete', userId },
+        });
+        if (error) throw error;
+        if (data && data.error) throw new Error(data.error);
+
+        alert('✅ تم حذف الحساب بنجاح');
+        loadUsers();
+      } catch (err) {
+        alert('❌ فشل الحذف: ' + err.message);
+        btn.disabled = false;
+        btn.textContent = '🗑 حذف';
+      }
+    });
+  });
 }
 
 document.getElementById('createUserBtn').addEventListener('click', async () => {
@@ -181,34 +215,31 @@ document.getElementById('createUserBtn').addEventListener('click', async () => {
 
   if (!email) { alert('⚠️ يرجى إدخال البريد الإلكتروني'); return; }
 
-  const tempPassword = generateTempPassword();
+  const btn = document.getElementById('createUserBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ جاري الإنشاء...';
 
   try {
-    const { data, error } = await sbClient.auth.signUp({
-      email, password: tempPassword, options: { data: { role } }
+    const { data, error } = await sbClient.functions.invoke('manage-user', {
+      body: { action: 'create', email, role },
     });
     if (error) throw error;
+    if (data && data.error) throw new Error(data.error);
 
-    document.getElementById('tempPasswordText').textContent = tempPassword;
+    document.getElementById('tempPasswordText').textContent = data.tempPassword;
     document.getElementById('tempPasswordDisplay').style.display = 'block';
 
-    alert(`✅ تم إنشاء الحساب بنجاح!\n\n📧 البريد: ${email}\n🔑 كلمة المرور المؤقتة: ${tempPassword}\n\n⚠️ سلّمها بنفسك للموظف.`);
+    alert(`✅ تم إنشاء الحساب بنجاح!\n\n📧 البريد: ${email}\n🔑 كلمة المرور المؤقتة: ${data.tempPassword}\n\n⚠️ سلّمها بنفسك للموظف.`);
 
     loadUsers();
     document.getElementById('newUserEmail').value = '';
   } catch (err) {
     alert('❌ فشل إنشاء الحساب: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '➕ إنشاء حساب';
   }
 });
-
-function generateTempPassword() {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
-  let password = '';
-  for (let i = 0; i < 12; i++) {
-    password += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return password;
-}
 </script>
 </body>
 </html>
