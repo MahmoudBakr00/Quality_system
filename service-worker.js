@@ -7,7 +7,7 @@
 // - طلبات Supabase (بيانات حية): بتتجاهل تمامًا، بتروح للنت مباشرة.
 // =========================================================
 
-const CACHE_NAME = 'defect-system-cache-v10';
+const CACHE_NAME = 'defect-system-cache-v11';
 
 const PRECACHE_URLS = [
   './',
