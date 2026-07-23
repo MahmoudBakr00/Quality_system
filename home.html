@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <link rel="manifest" href="manifest.json" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="متابعة العيوب" />
 <link rel="apple-touch-icon" href="icon-180.png" />
@@ -90,9 +91,14 @@ async function checkAuth() {
   applyTranslations();
   renderLangToggle('langToggleWrap');
   renderPendingBadge('pendingBadgeWrap');
-  renderPushToggleButton('pushToggleWrap', user.id);
+
   const { data: { user } } = await sbClient.auth.getUser();
   if (!user) { window.location.href = 'index.html'; return; }
+
+  // ملحوظة: renderPushToggleButton كان بينادى قبل ما "user" يتعرّف، وده كان بيسبب
+  // ReferenceError بيوقف باقي الدالة كلها من غير ما نلاحظ (بما فيها المزامنة للأوفلاين
+  // في آخر الدالة). دلوقتي بننادي عليه بعد ما "user" بقى معرّف ومتأكدين إنه مش null.
+  renderPushToggleButton('pushToggleWrap', user.id);
 
   const { data: profile, error } = await sbClient.from('profiles').select('role').eq('id', user.id).single();
   if (error || !profile) {
