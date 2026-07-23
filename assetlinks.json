@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "mideaqualitysystem.twa",
+        "sha256_cert_fingerprints": ["66:90:EC:03:A6:DF:45:36:E9:34:D4:CB:A3:4A:71:3D:13:A4:04:A7:04:05:B0:97:36:86:0E:75:AD:B1:29:AC"]
+      }
+    }]
