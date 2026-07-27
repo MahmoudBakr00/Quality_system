@@ -228,7 +228,7 @@ tr.row-clickable { cursor: pointer; }
 <thead><tr id="headerRow">
   <th id="checkboxHeaderCell" style="display:none;"><input type="checkbox" id="selectAllCheckbox" /></th>
 </tr></thead>
-<tbody id="tbody"><tr><td colspan="20" class="loading">⏳ جاري التحميل...</td></tr></tbody>
+<tbody id="tbody"><tr><td colspan="21" class="loading">⏳ جاري التحميل...</td></tr></tbody>
 </table>
 </div>
 
@@ -410,6 +410,36 @@ async function loadModelMappingCache() {
 }
 let allDefects = [];
 let supervisorAllowedStageIds = null; // بس للمشرف: المحطات اللي يقدر يعتمد/يرفض عليها
+// حالة "الإنذار المبكر" لكل عيب (زي علامات صح الواتساب):
+// defectTypesResponsibleSet = أنواع العيوب اللي ليها محطة مسؤولة (مفعّل عليها النظام)
+// rootCauseSubmittedSet = العيوب اللي المشرف المسؤول بعت ليها السبب والإجراء بالفعل
+let defectTypesResponsibleSet = new Set();
+let rootCauseSubmittedSet = new Set();
+
+async function loadRootCauseStatusMaps() {
+  const [{ data: defectTypes }, { data: rootCauses }] = await Promise.all([
+    sbClient.from('defect_types').select('id, responsible_stage_id'),
+    sbClient.from('defect_root_causes').select('defect_id'),
+  ]);
+  defectTypesResponsibleSet = new Set((defectTypes || []).filter(dt => dt.responsible_stage_id).map(dt => dt.id));
+  rootCauseSubmittedSet = new Set((rootCauses || []).map(rc => rc.defect_id));
+}
+
+function renderRootCauseStatusCell(d) {
+  if (!defectTypesResponsibleSet.has(d.defect_type_id)) {
+    return `<span style="color:#a16207; font-size:15px;" title="لا يوجد مشرف مسؤول عن هذا النوع">✓</span>`;
+  }
+  const responded = rootCauseSubmittedSet.has(d.id);
+  const color = responded ? '#38bdf8' : '#a16207';
+  const title = responded ? 'تم الرد بالسبب والإجراء' : 'في انتظار رد المشرف المسؤول';
+  return `<span style="color:${color}; font-size:15px; letter-spacing:-3px;" title="${title}">✓✓</span>`;
+}
+
+function getRootCauseStatusLabel(d) {
+  if (!defectTypesResponsibleSet.has(d.defect_type_id)) return 'لا يوجد مسؤول';
+  return rootCauseSubmittedSet.has(d.id) ? 'تم الرد' : 'في انتظار الرد';
+}
+
 // فلتر الباريتو التفاعلي: لو المستخدم دوس على عمود في الرسم، الجدول يتفلتر بنفس الفئة دي
 let paretoSelectedGroupBy = null;
 let paretoSelectedValue = null;
@@ -450,9 +480,26 @@ async function init() {
   loadStagesFilter();
   loadFactoryFilterOptions();
   loadModelMappingCache();
+  loadRootCauseStatusMaps();
   loadDefects();
   openDefectFromUrlIfPresent();
   subscribeToLiveDefectUpdates();
+  subscribeToLiveRootCauseUpdates();
+}
+
+// اشتراك لحظي: أي رد جديد بالسبب والإجراء يوصل، علامات الصح تتحدث فورًا من غير Refresh
+function subscribeToLiveRootCauseUpdates() {
+  try {
+    sbClient
+      .channel('root-causes-dashboard')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'defect_root_causes' }, async () => {
+        await loadRootCauseStatusMaps();
+        renderTable();
+      })
+      .subscribe();
+  } catch (e) {
+    console.warn('فشل الاشتراك اللحظي لتحديثات السبب والإجراء:', e);
+  }
 }
 
 // اشتراك لحظي: أي عيب جديد يتسجل أو أي تحديث (اعتماد/رفض) يحصل، الجدول يتحدّث فورًا من غير Refresh يدوي
@@ -535,7 +582,7 @@ document.getElementById('photoLightboxClose').addEventListener('click', () => {
 // ============ تحميل العيوب ============
 async function loadDefects() {
   const tbody = document.getElementById('tbody');
-  tbody.innerHTML = `<tr><td colspan="20" class="loading">⏳ جاري التحميل...</td></tr>`;
+  tbody.innerHTML = `<tr><td colspan="21" class="loading">⏳ جاري التحميل...</td></tr>`;
 
   const stageId = document.getElementById('filterStage').value;
   const status = document.getElementById('filterStatus').value;
@@ -662,6 +709,7 @@ const COLUMNS = [
   { key: 'checkbox', label: '', filterable: false, alwaysVisible: true, width: 40 },
   { key: 'serial', label: 'السيريال', getValue: d => d.serial_number || '-', width: 140 },
   { key: 'defect_code', label: 'كود العيب', getValue: d => d.defect_code || '-', width: 150 },
+  { key: 'root_cause_status', label: '🔔 حالة الرد', getValue: d => getRootCauseStatusLabel(d), width: 90 },
   { key: 'job_order', label: 'الجوب أوردر', getValue: d => d.job_order || '-', width: 110 },
   { key: 'base_model', label: 'البيز موديل', getValue: d => (modelMappingCache[d.job_order] && modelMappingCache[d.job_order].base_model) || '-', width: 110 },
   { key: 'market_model', label: 'الماركت موديل', getValue: d => (modelMappingCache[d.job_order] && modelMappingCache[d.job_order].market_model) || '-', width: 130 },
@@ -857,7 +905,7 @@ function renderTable() {
   const tbody = document.getElementById('tbody');
   const displayedDefects = getDisplayedDefects();
   if (displayedDefects.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="20" class="no-data">📭 لا توجد عيوب مطابقة</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="21" class="no-data">📭 لا توجد عيوب مطابقة</td></tr>`;
     renderParetoChart();
     return;
   }
@@ -877,6 +925,7 @@ function renderTable() {
       ${canSelect ? `<td onclick="event.stopPropagation()"><input type="checkbox" class="row-checkbox" data-id="${d.id}" data-status="${d.status}" /></td>` : ''}
       <td>${d.serial_number}</td>
       <td style="font-weight:bold; color:#93c5fd;">${d.defect_code || '-'}</td>
+      <td style="text-align:center;">${renderRootCauseStatusCell(d)}</td>
       <td>${d.job_order || '-'}</td>
       <td>${modelMappingCache[d.job_order]?.base_model || '-'}</td>
       <td>${modelMappingCache[d.job_order]?.market_model || '-'}</td>
@@ -1401,19 +1450,112 @@ async function openHistoryModal(defect) {
     .eq('defect_id', defect.id)
     .order('created_at', { ascending: true });
 
+  // نجيب السبب والإجراء التصحيحي (لو اتبعت) عشان نعرضه فوق سجل التاريخ
+  const { data: rootCause } = await sbClient
+    .from('defect_root_causes')
+    .select('*')
+    .eq('defect_id', defect.id)
+    .maybeSingle();
+
+  const canEditRootCause = currentRole === 'admin';
+  const rootCauseHtml = rootCause ? `
+    <div style="background:#052e16; border:1px solid #16a34a; border-radius:8px; padding:12px; margin-bottom:14px;" id="rootCauseDisplayBlock">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <span style="color:#4ade80; font-weight:bold; font-size:13px;">⚠️ السبب والإجراء التصحيحي (إنذار مبكر)</span>
+        ${canEditRootCause ? `<button id="editRootCauseBtn" style="background:#334155; color:#93c5fd; border:none; padding:3px 10px; border-radius:6px; cursor:pointer; font-size:11px;">✏️ تعديل</button>` : ''}
+      </div>
+      <div id="rootCauseViewMode">
+        <div style="font-size:12px; color:#cbd5e1; margin-bottom:6px;"><b>السبب الجذري:</b> ${rootCause.root_cause}</div>
+        <div style="font-size:12px; color:#cbd5e1; margin-bottom:6px;"><b>الإجراء التصحيحي:</b> ${rootCause.corrective_action}</div>
+        <div style="font-size:11px; color:#64748b;">بواسطة: ${rootCause.submitted_by_email || '-'} | ${formatDate(rootCause.created_at)}</div>
+        ${(rootCause.photo_urls && rootCause.photo_urls.length > 0) ? `
+          <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;">
+            ${rootCause.photo_urls.map(url => `<img src="${url}" style="width:60px; height:60px; object-fit:cover; border-radius:6px; cursor:pointer;" onclick="window.open('${url}','_blank')" />`).join('')}
+          </div>
+        ` : ''}
+      </div>
+      ${canEditRootCause ? `
+      <div id="rootCauseEditMode" style="display:none;">
+        <label style="display:block; color:#94a3b8; font-size:11px; margin-bottom:3px;">السبب الجذري</label>
+        <textarea id="editRootCauseInput" rows="2" style="width:100%; padding:8px; border:none; border-radius:6px; background:#334155; color:#f1f5f9; font-size:12px; margin-bottom:8px; resize:vertical;">${rootCause.root_cause}</textarea>
+        <label style="display:block; color:#94a3b8; font-size:11px; margin-bottom:3px;">الإجراء التصحيحي</label>
+        <textarea id="editCorrectiveActionInput" rows="2" style="width:100%; padding:8px; border:none; border-radius:6px; background:#334155; color:#f1f5f9; font-size:12px; margin-bottom:8px; resize:vertical;">${rootCause.corrective_action}</textarea>
+        <div style="display:flex; gap:8px;">
+          <button id="saveRootCauseEditBtn" style="flex:1; padding:8px; background:#3b82f6; color:white; border:none; border-radius:6px; cursor:pointer; font-size:12px; font-weight:bold;">💾 حفظ</button>
+          <button id="cancelRootCauseEditBtn" style="flex:1; padding:8px; background:#64748b; color:white; border:none; border-radius:6px; cursor:pointer; font-size:12px;">إلغاء</button>
+        </div>
+        <div id="rootCauseEditError" style="color:#f87171; font-size:11px; margin-top:6px;"></div>
+      </div>
+      ` : ''}
+    </div>
+  ` : '';
+
   if (error || !data || data.length === 0) {
-    body.innerHTML = '<div style="color:#64748b;">لا يوجد سجل تاريخي</div>';
+    body.innerHTML = rootCauseHtml + '<div style="color:#64748b;">لا يوجد سجل تاريخي</div>';
+    wireRootCauseEditHandlers(rootCause, defect.id);
     return;
   }
 
   const actionText = { created: '📝 تم التسجيل', approved: '✔ تم الاعتماد', rejected: '✖ تم الرفض', edited: '✏️ تم التعديل اليدوي', repair_reported: '🔧 تم الإبلاغ عن إصلاح', repair_confirmed: '✅ تم تأكيد الإصلاح', repair_rejected: '✖ تم رفض الإصلاح' };
-  body.innerHTML = data.map(h => `
+  body.innerHTML = rootCauseHtml + data.map(h => `
     <div class="history-item">
       <div class="action ${h.action}">${actionText[h.action] || h.action}</div>
       <div class="meta">${h.performed_by_email || '-'} | ${formatDate(h.created_at)}</div>
       ${h.note ? `<div class="meta">ملاحظة: ${h.note}</div>` : ''}
     </div>
   `).join('');
+  wireRootCauseEditHandlers(rootCause, defect.id);
+}
+
+// تفعيل زرار تعديل السبب والإجراء التصحيحي (للمهندسين/admin بس)
+function wireRootCauseEditHandlers(rootCause, defectId) {
+  const editBtn = document.getElementById('editRootCauseBtn');
+  if (!editBtn) return; // مفيش سبب/إجراء اتبعت لسه، أو المستخدم مش admin
+
+  const viewMode = document.getElementById('rootCauseViewMode');
+  const editMode = document.getElementById('rootCauseEditMode');
+
+  editBtn.addEventListener('click', () => {
+    viewMode.style.display = 'none';
+    editMode.style.display = 'block';
+  });
+
+  document.getElementById('cancelRootCauseEditBtn').addEventListener('click', () => {
+    editMode.style.display = 'none';
+    viewMode.style.display = 'block';
+  });
+
+  document.getElementById('saveRootCauseEditBtn').addEventListener('click', async () => {
+    const newRootCause = document.getElementById('editRootCauseInput').value.trim();
+    const newCorrectiveAction = document.getElementById('editCorrectiveActionInput').value.trim();
+    const errorDiv = document.getElementById('rootCauseEditError');
+    errorDiv.textContent = '';
+
+    if (!newRootCause || !newCorrectiveAction) {
+      errorDiv.textContent = '⚠️ من فضلك اكتب السبب والإجراء التصحيحي';
+      return;
+    }
+
+    const saveBtn = document.getElementById('saveRootCauseEditBtn');
+    saveBtn.disabled = true;
+    saveBtn.textContent = '⏳ جاري الحفظ...';
+
+    const { error: updateError } = await sbClient
+      .from('defect_root_causes')
+      .update({ root_cause: newRootCause, corrective_action: newCorrectiveAction })
+      .eq('id', rootCause.id);
+
+    saveBtn.disabled = false;
+    saveBtn.textContent = '💾 حفظ';
+
+    if (updateError) {
+      errorDiv.textContent = '❌ فشل الحفظ: ' + updateError.message;
+      return;
+    }
+
+    // إعادة فتح المودال عشان يعرض القيم الجديدة المحفوظة
+    openHistoryModal(currentModalDefect);
+  });
 }
 document.getElementById('historyClose').addEventListener('click', () => {
   historyModal.classList.remove('open');
