@@ -999,8 +999,15 @@ function renderNotificationBell(containerId, userId) {
         await sbClient.from('notifications').update({ is_read: true }).eq('id', row.dataset.id);
 
         // لو الإشعار مرتبط بعيب، وديه مباشرة لتفاصيله في الداشبورد
-        if (notif && notif.type === 'defect' && notif.related_id) {
+        if (notif && (notif.type === 'defect' || notif.type === 'escalation') && notif.related_id) {
           window.location.href = 'dashboard.html?defect_id=' + notif.related_id;
+          return;
+        }
+
+        // إشعار "إنذار مبكر" - افتح استمارة السبب والإجراء التصحيحي في مكانها
+        if (notif && notif.type === 'root_cause_request' && notif.related_id) {
+          document.getElementById('notifDropdown').style.display = 'none';
+          openRootCauseModal(notif.related_id);
           return;
         }
 
@@ -1048,9 +1055,155 @@ function renderNotificationBell(containerId, userId) {
 }
 
 // =========================================================
-// لوحة تشخيص بسيطة تظهر في الصفحة نفسها (مفيدة على الموبايل حيث
-// أدوات المطور صعبة الوصول)
+// Modal "السبب والإجراء التصحيحي" - بيفتح لما المشرف المسؤول يدوس
+// على إشعار "إنذار مبكر" من الجرس. بيتعمل ديناميكيًا (مش جزء ثابت
+// من HTML أي صفحة) عشان يشتغل من أي صفحة فيها الجرس.
 // =========================================================
+async function openRootCauseModal(defectId) {
+  // نتأكد إن الـ modal مبني مرة واحدة بس، ولو موجود نمسحه ونعيد بناءه بمحتوى جديد
+  let overlay = document.getElementById('rootCauseModalOverlay');
+  if (overlay) overlay.remove();
+
+  overlay = document.createElement('div');
+  overlay.id = 'rootCauseModalOverlay';
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:2000; display:flex; align-items:center; justify-content:center; padding:16px;';
+  overlay.innerHTML = `
+    <div style="background:#1e293b; border-radius:14px; padding:24px; width:100%; max-width:480px; max-height:90vh; overflow-y:auto; direction:rtl;">
+      <h3 style="color:#fbbf24; margin-bottom:14px; font-size:17px;">⚠️ إنذار مبكر: السبب والإجراء التصحيحي</h3>
+      <div id="rootCauseModalBody" style="color:#94a3b8; font-size:13px;">⏳ جاري التحميل...</div>
+      <button id="rootCauseModalCloseBtn" style="width:100%; margin-top:14px; padding:10px; background:#64748b; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold;">إغلاق</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById('rootCauseModalCloseBtn').addEventListener('click', () => overlay.remove());
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+  const body = document.getElementById('rootCauseModalBody');
+
+  // نجيب بيانات العيب نفسه
+  const { data: defect, error: defectError } = await sbClient
+    .from('defects')
+    .select('id, serial_number, defect_code, defect_type_id, defect_type_name, stage_name')
+    .eq('id', defectId)
+    .single();
+
+  if (defectError || !defect) {
+    body.innerHTML = '<div style="color:#f87171;">❌ تعذر تحميل بيانات العيب</div>';
+    return;
+  }
+
+  // نتأكد هل فيه سجل سبب/إجراء اتبعت قبل كده لنفس العيب ده
+  const { data: existing } = await sbClient
+    .from('defect_root_causes')
+    .select('*')
+    .eq('defect_id', defectId)
+    .maybeSingle();
+
+  const infoHtml = `
+    <div style="background:#0f172a; border-radius:8px; padding:10px 14px; margin-bottom:14px; font-size:12px;">
+      <div>🔢 السيريال: <b style="color:#f1f5f9;">${defect.serial_number}</b></div>
+      <div>🏷️ كود العيب: <b style="color:#f1f5f9;">${defect.defect_code || '-'}</b></div>
+      <div>⚠️ نوع العيب: <b style="color:#f1f5f9;">${defect.defect_type_name || '-'}</b></div>
+      <div>🏭 محطة التسجيل: <b style="color:#f1f5f9;">${defect.stage_name || '-'}</b></div>
+    </div>
+  `;
+
+  if (existing) {
+    // اتبعت قبل كده - نعرضه للقراءة بس (عشان جدول defect_root_causes فيه قيد
+    // unique(defect_id) بيمنع إرسال أكتر من سجل لنفس العيب)
+    body.innerHTML = `
+      ${infoHtml}
+      <div style="background:#052e16; border:1px solid #16a34a; border-radius:8px; padding:12px; margin-bottom:10px;">
+        <div style="color:#4ade80; font-weight:bold; font-size:12px; margin-bottom:8px;">✅ تم إرسال السبب والإجراء بالفعل</div>
+        <div style="font-size:12px; color:#cbd5e1; margin-bottom:6px;"><b>السبب:</b> ${existing.root_cause}</div>
+        <div style="font-size:12px; color:#cbd5e1; margin-bottom:6px;"><b>الإجراء التصحيحي:</b> ${existing.corrective_action}</div>
+        <div style="font-size:11px; color:#64748b;">بواسطة: ${existing.submitted_by_email || '-'} | ${formatDate(existing.created_at)}</div>
+        ${(existing.photo_urls && existing.photo_urls.length > 0) ? `
+          <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;">
+            ${existing.photo_urls.map(url => `<img src="${url}" style="width:60px; height:60px; object-fit:cover; border-radius:6px; cursor:pointer;" onclick="window.open('${url}','_blank')" />`).join('')}
+          </div>
+        ` : ''}
+      </div>
+    `;
+    return;
+  }
+
+  // مفيش سجل لسه - نعرض الاستمارة
+  body.innerHTML = `
+    ${infoHtml}
+    <label style="display:block; color:#cbd5e1; font-size:12px; margin-bottom:4px;">🔍 السبب الجذري</label>
+    <textarea id="rootCauseInput" rows="3" placeholder="ما هو سبب حدوث هذا العيب؟" style="width:100%; padding:10px; border:none; border-radius:8px; background:#334155; color:#f1f5f9; font-size:13px; margin-bottom:12px; resize:vertical;"></textarea>
+    <label style="display:block; color:#cbd5e1; font-size:12px; margin-bottom:4px;">🛠️ الإجراء التصحيحي</label>
+    <textarea id="correctiveActionInput" rows="3" placeholder="ما الإجراء الذي تم اتخاذه لمنع تكرار المشكلة؟" style="width:100%; padding:10px; border:none; border-radius:8px; background:#334155; color:#f1f5f9; font-size:13px; margin-bottom:12px; resize:vertical;"></textarea>
+    <label style="display:block; color:#cbd5e1; font-size:12px; margin-bottom:4px;">📷 صور (اختياري)</label>
+    <input type="file" id="rootCausePhotosInput" accept="image/*" multiple capture="environment" style="width:100%; margin-bottom:14px; font-size:12px; color:#94a3b8;" />
+    <button id="submitRootCauseBtn" style="width:100%; padding:11px; background:#3b82f6; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">✅ إرسال</button>
+    <div id="rootCauseSubmitError" style="color:#f87171; font-size:12px; margin-top:8px;"></div>
+  `;
+
+  document.getElementById('submitRootCauseBtn').addEventListener('click', async () => {
+    const rootCause = document.getElementById('rootCauseInput').value.trim();
+    const correctiveAction = document.getElementById('correctiveActionInput').value.trim();
+    const errorDiv = document.getElementById('rootCauseSubmitError');
+    errorDiv.textContent = '';
+
+    if (!rootCause || !correctiveAction) {
+      errorDiv.textContent = '⚠️ من فضلك اكتب السبب والإجراء التصحيحي';
+      return;
+    }
+
+    const btn = document.getElementById('submitRootCauseBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ جاري الإرسال...';
+
+    try {
+      const { data: { user } } = await sbClient.auth.getUser();
+
+      // نجيب المحطة المسؤولة الحقيقية من نوع العيب (عشان سياسة RLS تتحقق صح)
+      const { data: dtRow } = await sbClient
+        .from('defect_types')
+        .select('responsible_stage_id')
+        .eq('id', defect.defect_type_id)
+        .single();
+
+      // رفع الصور (لو موجودة) لنفس الـ bucket المستخدم لصور العيوب
+      const photoInput = document.getElementById('rootCausePhotosInput');
+      const photoUrls = [];
+      if (photoInput.files && photoInput.files.length > 0) {
+        btn.textContent = '⏳ جاري رفع الصور...';
+        for (const file of photoInput.files) {
+          const path = `root-causes/${defectId}/${Date.now()}-${file.name}`;
+          const { error: uploadError } = await sbClient.storage.from('defect-photos').upload(path, file);
+          if (uploadError) { console.warn('فشل رفع صورة:', uploadError); continue; }
+          const { data: publicUrlData } = sbClient.storage.from('defect-photos').getPublicUrl(path);
+          photoUrls.push(publicUrlData.publicUrl);
+        }
+      }
+
+      btn.textContent = '⏳ جاري الحفظ...';
+      const { error: insertError } = await sbClient.from('defect_root_causes').insert([{
+        defect_id: defectId,
+        defect_type_id: defect.defect_type_id,
+        responsible_stage_id: dtRow ? dtRow.responsible_stage_id : null,
+        root_cause: rootCause,
+        corrective_action: correctiveAction,
+        photo_urls: photoUrls,
+        submitted_by: user.id,
+        submitted_by_email: user.email,
+      }]);
+
+      if (insertError) throw insertError;
+
+      body.innerHTML = `${infoHtml}<div style="color:#4ade80; text-align:center; padding:20px; font-weight:bold;">✅ تم إرسال السبب والإجراء التصحيحي بنجاح</div>`;
+    } catch (err) {
+      errorDiv.textContent = '❌ فشل الإرسال: ' + err.message;
+      btn.disabled = false;
+      btn.textContent = '✅ إرسال';
+    }
+  });
+}
+
+
 function renderDiagnosticsPanel(containerId) {
   const container = document.getElementById(containerId);
   if (!container) return;
