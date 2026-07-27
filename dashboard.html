@@ -89,6 +89,11 @@ tr.row-clickable { cursor: pointer; }
 .defect-type-tag { display: inline-flex; align-items: center; gap: 4px; background: #1e293b; color: #cbd5e1; padding: 3px 8px; border-radius: 12px; font-size: 11px; margin: 3px 3px 0 0; }
 .defect-type-tag button { background: none; border: none; color: #f87171; cursor: pointer; font-size: 12px; }
 .defect-type-tag.selected { background: #7c2d2d; }
+.dt-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; background: #1e293b; border-radius: 8px; padding: 6px 10px; margin-bottom: 4px; }
+.dt-row .dt-name { color: #cbd5e1; font-size: 12px; flex: 1; min-width: 90px; }
+.dt-row .responsible-stage-select { background: #334155; color: #f1f5f9; border: none; border-radius: 6px; padding: 4px 8px; font-size: 11px; max-width: 160px; }
+.dt-row .responsible-stage-select.has-value { border: 1px solid #f59e0b; }
+.dt-row button.remove-dt-btn { background: none; border: none; color: #f87171; cursor: pointer; font-size: 13px; }
 .dt-checkbox { margin-left: 2px; }
 .bulk-delete-row { display: flex; gap: 8px; margin: 8px 0; }
 .bulk-delete-btn { background: #ef4444; color: white; border: none; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: bold; }
@@ -1845,8 +1850,19 @@ async function loadStationsList() {
 
         <hr style="border-color:#475569; margin:14px 0;" />
         <label style="color:#94a3b8;font-size:12px;">أنواع العيوب في هذه المحطة:</label>
+        <div style="color:#64748b; font-size:11px; margin:2px 0 6px;">🎯 "المحطة المسؤولة" = لو اتسجل عيب من النوع ده في أي محطة، مشرفي المحطة دي ياخدوا إشعار "إنذار مبكر" ومطلوب منهم يكتبوا السبب والإجراء التصحيحي.</div>
         <div id="defect-types-${s.id}">
-          ${stageDefectTypes.map(dt => `<span class="defect-type-tag"><input type="checkbox" class="dt-checkbox" data-dt-id="${dt.id}" /> ${dt.name} <button data-dt-id="${dt.id}" class="remove-dt-btn">×</button></span>`).join('') || '<span style="color:#64748b;font-size:12px;">لا يوجد</span>'}
+          ${stageDefectTypes.map(dt => `
+            <div class="dt-row">
+              <input type="checkbox" class="dt-checkbox" data-dt-id="${dt.id}" />
+              <span class="dt-name">${dt.name}</span>
+              <select class="responsible-stage-select ${dt.responsible_stage_id ? 'has-value' : ''}" data-dt-id="${dt.id}">
+                <option value="">🎯 بدون محطة مسؤولة</option>
+                ${stages.map(st => `<option value="${st.id}" ${dt.responsible_stage_id === st.id ? 'selected' : ''}>${st.name}</option>`).join('')}
+              </select>
+              <button data-dt-id="${dt.id}" class="remove-dt-btn">×</button>
+            </div>
+          `).join('') || '<span style="color:#64748b;font-size:12px;">لا يوجد</span>'}
         </div>
         <div class="bulk-delete-row">
           <button class="bulk-delete-btn bulk-delete-dt-btn" data-stage-id="${s.id}">🗑 حذف أنواع العيوب المحددة</button>
@@ -1987,6 +2003,20 @@ async function loadStationsList() {
     btn.addEventListener('click', async () => {
       await sbClient.from('defect_types').delete().eq('id', btn.dataset.dtId);
       loadStationsList();
+    });
+  });
+
+  // تحديد/تغيير "المحطة المسؤولة" عن نوع عيب معين (نظام الإنذار المبكر)
+  container.querySelectorAll('.responsible-stage-select').forEach(sel => {
+    sel.addEventListener('click', (e) => e.stopPropagation());
+    sel.addEventListener('change', async () => {
+      const dtId = sel.dataset.dtId;
+      const newValue = sel.value || null;
+      sel.disabled = true;
+      const { error } = await sbClient.from('defect_types').update({ responsible_stage_id: newValue }).eq('id', dtId);
+      sel.disabled = false;
+      if (error) { alert('❌ فشل الحفظ: ' + error.message); return; }
+      sel.classList.toggle('has-value', !!newValue);
     });
   });
 
