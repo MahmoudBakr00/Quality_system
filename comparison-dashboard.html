@@ -251,39 +251,44 @@ async function loadLogs() {
   const tbody = document.getElementById('logsTbody');
   tbody.innerHTML = '<tr><td colspan="7">⏳ جاري التحميل...</td></tr>';
 
-  const stationId = document.getElementById('logFilterStation').value;
-  const result = document.getElementById('logFilterResult').value;
-  const userSearch = document.getElementById('logFilterUser').value.trim();
-  const inputSearch = document.getElementById('logFilterInput').value.trim().toLowerCase();
+  try {
+    const stationId = document.getElementById('logFilterStation').value;
+    const result = document.getElementById('logFilterResult').value;
+    const userSearch = document.getElementById('logFilterUser').value.trim();
+    const inputSearch = document.getElementById('logFilterInput').value.trim().toLowerCase();
 
-  let query = sbClient.from('comparison_logs').select('*').order('created_at', { ascending: false }).limit(500);
-  if (stationId) query = query.eq('station_id', stationId);
-  if (result) query = query.eq('result', result);
-  if (userSearch) query = query.ilike('performed_by_email', `%${userSearch}%`);
+    let query = sbClient.from('comparison_logs').select('*').order('created_at', { ascending: false }).limit(500);
+    if (stationId) query = query.eq('station_id', stationId);
+    if (result) query = query.eq('result', result);
+    if (userSearch) query = query.ilike('performed_by_email', `%${userSearch}%`);
 
-  const { data, error } = await query;
-  let logs = data || [];
+    const { data, error } = await query;
+    let logs = data || [];
 
-  // فلتر البحث في القيم المسكونة (بنفلتره على الناتج، لأنه جوه JSONB)
-  if (inputSearch) {
-    logs = logs.filter(log =>
-      Object.values(log.scanned_values || {}).some(v => String(v).toLowerCase().includes(inputSearch))
-    );
-  }
+    // فلتر البحث في القيم المسكونة (بنفلتره على الناتج، لأنه جوه JSONB)
+    if (inputSearch) {
+      logs = logs.filter(log =>
+        Object.values(log.scanned_values || {}).some(v => String(v).toLowerCase().includes(inputSearch))
+      );
+    }
 
-  currentLogsCache = logs;
-  // تحميل بيانات جديدة = الفلتر القديم بتاع الباريتو بقى من غير معنى
-  logsParetoSelectedGroupBy = null;
-  logsParetoSelectedValue = null;
+    currentLogsCache = logs;
+    // تحميل بيانات جديدة = الفلتر القديم بتاع الباريتو بقى من غير معنى
+    logsParetoSelectedGroupBy = null;
+    logsParetoSelectedValue = null;
 
-  if (error) {
-    tbody.innerHTML = '<tr><td colspan="7">❌ حدث خطأ أثناء التحميل</td></tr>';
+    if (error) {
+      tbody.innerHTML = '<tr><td colspan="7">❌ حدث خطأ أثناء التحميل</td></tr>';
+      renderLogsParetoChart();
+      return;
+    }
+
+    renderLogsTable();
     renderLogsParetoChart();
-    return;
+  } catch (err) {
+    console.error('فشل تحميل سجل المقارنات:', err);
+    tbody.innerHTML = `<tr><td colspan="7">❌ حصل خطأ: ${err.message || err}</td></tr>`;
   }
-
-  renderLogsTable();
-  renderLogsParetoChart();
 }
 
 // فلتر الباريتو بيتطبق على الجدول فقط، مش على الرسم نفسه (عشان تفضل تقدر تشوف كل الفئات)
@@ -479,9 +484,16 @@ document.getElementById('resetLogFilter').addEventListener('click', () => {
 let allUsersCache = [];
 
 async function loadStationsManagement() {
-  const { data: users } = await sbClient.from('profiles').select('id, email').order('email');
-  allUsersCache = users || [];
-  loadStationsList();
+  try {
+    const { data: users, error } = await sbClient.from('profiles').select('id, email').order('email');
+    if (error) throw error;
+    allUsersCache = users || [];
+    await loadStationsList();
+  } catch (err) {
+    console.error('فشل تحميل بيانات إدارة المحطات:', err);
+    document.getElementById('stationsList').innerHTML =
+      `<div style="color:#f87171;">❌ حصل خطأ أثناء تحميل المحطات: ${err.message || err}</div>`;
+  }
 }
 
 document.getElementById('createStationBtn').addEventListener('click', async () => {
@@ -500,22 +512,26 @@ async function loadStationsList() {
   const container = document.getElementById('stationsList');
   container.innerHTML = '⏳ جاري التحميل...';
 
-  const { data: stations } = await sbClient.from('comparison_stations').select('*').order('name');
-  const { data: allConditions } = await sbClient.from('comparison_conditions').select('*').order('order_index');
-  const { data: allAssignments } = await sbClient.from('comparison_station_users').select('*, profiles(email)');
+  try {
+    const { data: stations, error: stErr } = await sbClient.from('comparison_stations').select('*').order('name');
+    if (stErr) throw stErr;
+    const { data: allConditions, error: condErr } = await sbClient.from('comparison_conditions').select('*').order('order_index');
+    if (condErr) throw condErr;
+    const { data: allAssignments, error: asgErr } = await sbClient.from('comparison_station_users').select('*, profiles(email)');
+    if (asgErr) throw asgErr;
 
-  if (!stations || stations.length === 0) {
-    container.innerHTML = '<div style="color:#64748b;">لا توجد محطات مضافة بعد</div>';
-    return;
-  }
+    if (!stations || stations.length === 0) {
+      container.innerHTML = '<div style="color:#64748b;">لا توجد محطات مضافة بعد</div>';
+      return;
+    }
 
-  container.innerHTML = stations.map(s => {
-    const conditions = (allConditions || []).filter(c => c.station_id === s.id);
-    const assignments = (allAssignments || []).filter(a => a.station_id === s.id);
-    return `
-    <div class="station-card">
-      <div class="s-title">
-        <span>🏭 ${s.name}</span>
+    container.innerHTML = stations.map(s => {
+      const conditions = (allConditions || []).filter(c => c.station_id === s.id);
+      const assignments = (allAssignments || []).filter(a => a.station_id === s.id);
+      return `
+      <div class="station-card">
+        <div class="s-title">
+          <span>🏭 ${s.name}</span>
         <button class="small-btn danger" data-station-id="${s.id}" onclick="deleteComparisonStation('${s.id}')">🗑 حذف المحطة</button>
       </div>
 
@@ -585,6 +601,10 @@ async function loadStationsList() {
     const el = document.getElementById(`refCount-${s.id}`);
     if (el) el.textContent = `عدد الصفوف المخزّنة حاليًا: ${count || 0}`;
   });
+  } catch (err) {
+    console.error('فشل تحميل قائمة المحطات:', err);
+    container.innerHTML = `<div style="color:#f87171;">❌ حصل خطأ أثناء تحميل المحطات: ${err.message || err}</div>`;
+  }
 }
 
 function renderConditionRow(c) {
