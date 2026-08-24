@@ -172,6 +172,27 @@ td { padding: 8px; text-align: center; border-bottom: 1px solid #334155; }
 
 <script src="shared.js"></script>
 <script>
+// =========================================================
+// شبكة أمان: أي خطأ JS في أي حتة في الصفحة (حتى لو جوه دالة مش
+// متوقعينها) بيظهر في بانر أحمر ثابت فوق الصفحة - عشان ما تحتاجش
+// تفتح Console كل مرة تشخّص مشكلة
+// =========================================================
+window.addEventListener('error', (e) => showFatalErrorBanner(e.message));
+window.addEventListener('unhandledrejection', (e) => showFatalErrorBanner((e.reason && e.reason.message) || String(e.reason)));
+
+function showFatalErrorBanner(message) {
+  let banner = document.getElementById('fatalErrorBanner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'fatalErrorBanner';
+    banner.style.cssText = 'position:fixed; top:0; left:0; right:0; z-index:9999; background:#7f1d1d; color:white; padding:12px 20px; font-size:13px; direction:rtl; text-align:right; box-shadow:0 2px 10px rgba(0,0,0,0.5);';
+    document.body.prepend(banner);
+  }
+  const line = document.createElement('div');
+  line.textContent = '❌ حصل خطأ: ' + message;
+  banner.appendChild(line);
+}
+
 let currentUser = null;
 let currentRole = null;
 let isFullAccess = false;
@@ -220,14 +241,20 @@ async function init() {
   loadLogs();
   if (isFullAccess) loadStationsManagement();
 }
-init();
+init().catch(err => showFatalErrorBanner('فشل تحميل الصفحة: ' + err.message));
 
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById(btn.dataset.tab).classList.add('active');
+    try {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      btn.classList.add('active');
+      const target = document.getElementById(btn.dataset.tab);
+      if (!target) { showFatalErrorBanner('لم يتم إيجاد المحتوى المرتبط بالتبويب: ' + btn.dataset.tab); return; }
+      target.classList.add('active');
+    } catch (err) {
+      showFatalErrorBanner('خطأ عند تبديل التبويب: ' + err.message);
+    }
   });
 });
 
