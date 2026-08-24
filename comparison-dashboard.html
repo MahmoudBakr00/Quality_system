@@ -252,6 +252,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
       const target = document.getElementById(btn.dataset.tab);
       if (!target) { showFatalErrorBanner('لم يتم إيجاد المحتوى المرتبط بالتبويب: ' + btn.dataset.tab); return; }
       target.classList.add('active');
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (err) {
       showFatalErrorBanner('خطأ عند تبديل التبويب: ' + err.message);
     }
