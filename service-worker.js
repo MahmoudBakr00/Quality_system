@@ -7,7 +7,7 @@
 // - طلبات Supabase (بيانات حية): بتتجاهل تمامًا، بتروح للنت مباشرة.
 // =========================================================
 
-const CACHE_NAME = 'defect-system-cache-v11';
+const CACHE_NAME = 'defect-system-cache-v12';
 
 const PRECACHE_URLS = [
   './',
@@ -109,6 +109,13 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // طلبات من إضافات المتصفح (chrome-extension://, moz-extension://...) أو أي بروتوكول
+  // غير http/https - الـ Cache API مش بتدعمها خالص، سيبها للمتصفح يتعامل معاها عادي
+  // (ده كان بيسبب خطأ "Request scheme ... is unsupported" في الكونسول)
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    return;
+  }
+
   // مكتبات CDN: Cache-First (نادرًا ما تتغير، والأهم إنها تشتغل أوفلاين)
   if (isCdnLibrary(url)) {
     event.respondWith(
@@ -119,7 +126,7 @@ self.addEventListener('fetch', (event) => {
           const response = await fetch(event.request);
           if (response && response.status === 200) {
             const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone)).catch(() => {});
           }
           return response;
         } catch (err) {
@@ -138,7 +145,7 @@ self.addEventListener('fetch', (event) => {
         const networkResponse = await fetch(event.request);
         if (networkResponse && networkResponse.status === 200) {
           const clone = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone)).catch(() => {});
         }
         return networkResponse;
       } catch (err) {
