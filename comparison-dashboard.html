@@ -247,12 +247,28 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     try {
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => {
+        c.classList.remove('active');
+        // إجبار الإخفاء بالـ inline style مباشرة (أقوى من أي تعارض CSS محتمل)
+        c.style.setProperty('display', 'none', 'important');
+      });
       btn.classList.add('active');
       const target = document.getElementById(btn.dataset.tab);
       if (!target) { showFatalErrorBanner('لم يتم إيجاد المحتوى المرتبط بالتبويب: ' + btn.dataset.tab); return; }
       target.classList.add('active');
+      // إجبار الإظهار بالـ inline style مباشرة بدل ما نعتمد على الكلاس بس
+      target.style.setProperty('display', 'block', 'important');
+      target.style.setProperty('visibility', 'visible', 'important');
+      target.style.setProperty('opacity', '1', 'important');
+      target.style.setProperty('height', 'auto', 'important');
       target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // تسجيل تلقائي في الكونسول للتشخيص - يظهر من غير ما تحتاج تكتب أي أمر
+      console.log('[تبديل تبويب]', btn.dataset.tab, {
+        classList: target.className,
+        computedDisplay: getComputedStyle(target).display,
+        offsetHeight: target.offsetHeight,
+        childrenCount: target.children.length
+      });
     } catch (err) {
       showFatalErrorBanner('خطأ عند تبديل التبويب: ' + err.message);
     }
