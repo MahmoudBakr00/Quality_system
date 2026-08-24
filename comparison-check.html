@@ -49,6 +49,10 @@ select:focus, input:focus { outline: 2px solid #3b82f6; }
 .result-overlay.ok { background: linear-gradient(135deg, #16a34a 0%, #22c55e 100%); }
 .result-overlay.ng { background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%); }
 .result-overlay.undefined { background: linear-gradient(135deg, #d97706 0%, #fbbf24 100%); }
+.result-overlay.scrap { background: linear-gradient(135deg, #0f0f0f 0%, #3f0d0d 100%); }
+.result-overlay.pending_defect { background: linear-gradient(135deg, #581c87 0%, #a855f7 100%); }
+.register-missing-btn { background: rgba(255,255,255,0.15); color: white; border: 1px solid rgba(255,255,255,0.4); padding: 10px 20px; border-radius: 50px; font-size: 13px; font-weight: bold; cursor: pointer; margin-top: 10px; }
+.register-missing-btn:hover { background: rgba(255,255,255,0.25); }
 @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
 .result-overlay .result-icon { font-size: 6rem; margin-bottom: 16px; animation: bounceIn 0.5s ease; }
 @keyframes bounceIn { 0% { transform: scale(0); } 50% { transform: scale(1.2); } 100% { transform: scale(1); } }
@@ -152,27 +156,16 @@ select:focus, input:focus { outline: 2px solid #3b82f6; }
       <div id="conditionsChips"></div>
     </div>
 
-    <label>🔢 سيريال المنتج</label>
+    <label>📷 سكان</label>
     <div class="scan-row">
-      <input type="text" id="serialInput" placeholder="اكتب السيريال أو استخدم الباركود سكانر" autocomplete="off" />
-      <button type="button" class="scan-btn serial" id="openSerialScannerBtn">📷 باركود</button>
+      <input type="text" id="unifiedScanInput" placeholder="اسكان الكود أو اكتبه واضغط Enter" autocomplete="off" />
+      <button type="button" class="scan-btn serial" id="openCameraScannerBtn">📷 كاميرا</button>
     </div>
-    <div class="extract-preview" id="serialExtractPreview">
-      <div class="title">القيم المستخرجة من السيريال:</div>
-      <div class="value" id="serialExtractValue"></div>
+    <div id="scanProgressWrap" style="display:none; margin: -10px 0 18px;">
+      <div style="color:#94a3b8; font-size:12px; margin-bottom:6px;" id="scanProgressLabel"></div>
+      <div id="scanBufferChips" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+      <button type="button" id="resetScanBtn" style="background:#64748b; color:white; border:none; padding:6px 14px; border-radius:6px; font-size:12px; margin-top:8px; cursor:pointer;">🗑 إلغاء ومسح من جديد</button>
     </div>
-
-    <label>📱 QR Code / لينك</label>
-    <div class="scan-row">
-      <input type="text" id="qrInput" placeholder="اكتب الـ QR أو استخدم الكاميرا" autocomplete="off" />
-      <button type="button" class="scan-btn qr" id="openQrScannerBtn">📷 QR</button>
-    </div>
-    <div class="extract-preview" id="qrExtractPreview">
-      <div class="title">القيم المستخرجة من QR:</div>
-      <div class="value" id="qrExtractValue"></div>
-    </div>
-
-    <button class="btn-check" id="checkBtn">🔎 تنفيذ الفحص</button>
   </div>
 
   <!-- Recent Logs -->
@@ -202,6 +195,9 @@ select:focus, input:focus { outline: 2px solid #3b82f6; }
   <div class="result-text" id="resultText">OK</div>
   <div class="result-sub" id="resultSub">جميع الشروط مطابقة</div>
   <div class="result-detail" id="resultDetail"></div>
+  <div id="registerMissingWrap" style="display:none;">
+    <button class="register-missing-btn" id="registerMissingBtn">➕ سجّل القيمة دي كموديل صحيح جديد</button>
+  </div>
   <button id="resultCloseBtn">✓ موافق — فحص جديد</button>
 </div>
 
@@ -212,6 +208,7 @@ let currentScanner = null;
 let currentStation = null;
 let currentConditions = [];
 let todayStats = { total: 0, ok: 0, ng: 0 };
+let isFullAccessUser = false;
 
 // =========================================================
 // Initialization
@@ -222,16 +219,19 @@ async function init() {
   const auth = await requireAuth();
   if (!auth) return;
   currentUser = auth.user;
+  isFullAccessUser = auth.role === 'admin' || auth.role === 'general_supervisor';
   document.getElementById('userEmail').textContent = auth.user.email;
 
   await loadStations();
   loadTodayStats();
   loadRecentLogs();
 
-  // Auto-focus on serial input for barcode scanner
-  document.getElementById('serialInput').focus();
+  // Auto-focus on the single scan field
+  document.getElementById('unifiedScanInput').focus();
 }
 init();
+
+let allStationsData = [];
 
 // =========================================================
 // Load Stations
@@ -246,6 +246,7 @@ async function loadStations() {
       .order('name');
 
     if (error) throw error;
+    allStationsData = data || [];
 
     if (!data || data.length === 0) {
       select.innerHTML = '<option value="">📭 لا توجد محطات مضافة</option>';
@@ -257,7 +258,6 @@ async function loadStations() {
       const o = document.createElement('option');
       o.value = s.id;
       o.textContent = s.name;
-      o.dataset.name = s.name;
       select.appendChild(o);
     });
   } catch (err) {
@@ -267,6 +267,63 @@ async function loadStations() {
 }
 
 // =========================================================
+// Scan buffer: كل كود بيتضاف هنا لحد ما نوصل لعدد الأكواد المطلوب للمحطة
+// =========================================================
+let scanBuffer = [];
+
+function resetScanBuffer() {
+  scanBuffer = [];
+  renderScanProgress();
+  document.getElementById('unifiedScanInput').value = '';
+  document.getElementById('unifiedScanInput').focus();
+}
+
+function renderScanProgress() {
+  const wrap = document.getElementById('scanProgressWrap');
+  const label = document.getElementById('scanProgressLabel');
+  const chips = document.getElementById('scanBufferChips');
+  const expected = currentStation ? (currentStation.scansPerUnit || 1) : 1;
+
+  if (!currentStation || expected <= 1) {
+    wrap.style.display = 'none';
+    return;
+  }
+
+  wrap.style.display = 'block';
+  label.textContent = `تم سكان ${scanBuffer.length} من ${expected} أكواد مطلوبة لهذه الوحدة`;
+  chips.innerHTML = scanBuffer.map((code, i) => `
+    <span class="condition-chip" style="direction:ltr;">${i + 1}. ${code}</span>
+  `).join('');
+}
+
+document.getElementById('resetScanBtn').addEventListener('click', resetScanBuffer);
+
+async function handleScan(rawValue) {
+  const value = (rawValue || '').trim();
+  if (!value) return;
+
+  if (!currentStation) { alert('⚠️ اختر محطة الفحص أولاً'); return; }
+
+  scanBuffer.push(value);
+  document.getElementById('unifiedScanInput').value = '';
+  renderScanProgress();
+
+  const expected = currentStation.scansPerUnit || 1;
+  if (scanBuffer.length >= expected) {
+    await runComparison();
+  } else {
+    document.getElementById('unifiedScanInput').focus();
+  }
+}
+
+document.getElementById('unifiedScanInput').addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    handleScan(e.target.value);
+  }
+});
+
+// =========================================================
 // Load Conditions when station changes
 // =========================================================
 document.getElementById('stationSelect').addEventListener('change', async (e) => {
@@ -274,17 +331,23 @@ document.getElementById('stationSelect').addEventListener('change', async (e) =>
   const preview = document.getElementById('conditionsPreview');
   const chips = document.getElementById('conditionsChips');
 
+  resetScanBuffer();
+
   if (!stationId) {
     preview.style.display = 'none';
     currentConditions = [];
     currentStation = null;
+    renderScanProgress();
     return;
   }
 
+  const stationRow = allStationsData.find(s => s.id === stationId);
   currentStation = {
     id: stationId,
-    name: e.target.selectedOptions[0].dataset.name
+    name: stationRow ? stationRow.name : e.target.selectedOptions[0].textContent,
+    scansPerUnit: stationRow ? (stationRow.scans_per_unit || 1) : 1
   };
+  renderScanProgress();
 
   try {
     const { data, error } = await sbClient
@@ -305,16 +368,13 @@ document.getElementById('stationSelect').addEventListener('change', async (e) =>
     chips.innerHTML = currentConditions.map(c => `
       <span class="condition-chip">
         <span class="chip-type ${c.comparison_type === 'peer' ? 'peer' : 'db'}">${c.comparison_type === 'peer' ? '🔗' : '📊'}</span>
-        ${c.order_index}. ${c.name} 
-        <span style="color:#94a3b8;">(${c.extract_start}-${c.extract_end})</span>
+        ${c.order_index}. ${c.name}
+        ${c.extract_start ? `<span style="color:#94a3b8;">(${c.extract_start}-${c.extract_end})</span>` : ''}
         ${c.comparison_type === 'peer' ? `<span style="color:#a78bfa;">← شرط #${c.peer_condition_order}</span>` : ''}
       </span>
     `).join('');
 
     preview.style.display = 'block';
-
-    // Update extract previews
-    updateExtractPreviews();
 
   } catch (err) {
     console.error('فشل تحميل الشروط:', err);
@@ -324,7 +384,7 @@ document.getElementById('stationSelect').addEventListener('change', async (e) =>
 });
 
 // =========================================================
-// Extract Preview Logic
+// Extract helper
 // =========================================================
 function extractSubstring(str, start, end) {
   if (!str || !start || !end) return null;
@@ -332,84 +392,45 @@ function extractSubstring(str, start, end) {
   return str.substring(start - 1, end);
 }
 
-function updateExtractPreviews() {
-  const serial = document.getElementById('serialInput').value.trim();
-  const qr = document.getElementById('qrInput').value.trim();
+// =========================================================
+// فحص حالة العيوب المسجلة على السيريال ده (منفصل عن نتيجة شروط المقارنة)
+// بيرجع: 'scrap' لو فيه عيب اتقرر سكراب، 'pending' لو فيه عيب لسه معلق
+// (لم يُتخذ قرار)، أو null لو مفيش عيوب أو كلها اتاخد فيها قرار (إصلاح/موافقة بعلم/تغيير...)
+// =========================================================
+async function checkDefectStatus(serial) {
+  try {
+    const { data, error } = await sbClient
+      .from('defects')
+      .select('status, action_taken')
+      .eq('serial_number', serial);
 
-  const serialPreview = document.getElementById('serialExtractPreview');
-  const serialValue = document.getElementById('serialExtractValue');
-  const qrPreview = document.getElementById('qrExtractPreview');
-  const qrValue = document.getElementById('qrExtractValue');
+    if (error || !data || data.length === 0) return null;
 
-  if (!currentConditions.length) {
-    serialPreview.style.display = 'none';
-    qrPreview.style.display = 'none';
-    return;
-  }
-
-  // Show all extracted values
-  if (serial) {
-    const extracts = currentConditions.map(c => {
-      const val = extractSubstring(serial, c.extract_start, c.extract_end);
-      return `${c.order_index}: "${val || 'N/A'}"`;
-    }).join(' | ');
-    serialValue.textContent = extracts;
-    serialPreview.style.display = 'block';
-  } else {
-    serialPreview.style.display = 'none';
-  }
-
-  if (qr) {
-    const extracts = currentConditions.map(c => {
-      const val = extractSubstring(qr, c.extract_start, c.extract_end);
-      return `${c.order_index}: "${val || 'N/A'}"`;
-    }).join(' | ');
-    qrValue.textContent = extracts;
-    qrPreview.style.display = 'block';
-  } else {
-    qrPreview.style.display = 'none';
+    if (data.some(d => d.status === 'rejected' && d.action_taken === 'scrap')) return 'scrap';
+    if (data.some(d => d.status === 'pending')) return 'pending';
+    return null;
+  } catch (err) {
+    console.warn('فشل فحص حالة العيوب:', err);
+    return null;
   }
 }
 
-document.getElementById('serialInput').addEventListener('input', updateExtractPreviews);
-document.getElementById('qrInput').addEventListener('input', updateExtractPreviews);
-
 // =========================================================
-// Scanner Logic
+// Scanner Logic (زرار كاميرا واحد، بيغذي نفس خانة السكان الموحدة)
 // =========================================================
 const scannerModal = document.getElementById('scannerModal');
 
-function openScanner(type) {
-  const title = document.getElementById('scannerTitle');
-  title.textContent = type === 'serial' 
-    ? '📷 وجّه الكاميرا نحو باركود السيريال' 
-    : '📷 وجّه الكاميرا نحو QR Code';
-
+function openScanner() {
+  document.getElementById('scannerTitle').textContent = '📷 وجّه الكاميرا نحو الكود';
   scannerModal.classList.add('open');
 
-  const onResult = (decodedText) => {
-    if (type === 'serial') {
-      document.getElementById('serialInput').value = decodedText;
-      document.getElementById('serialInput').dispatchEvent(new Event('input'));
-      // Auto-focus QR if serial is filled
-      if (!document.getElementById('qrInput').value) {
-        setTimeout(() => document.getElementById('qrInput').focus(), 300);
-      }
-    } else {
-      document.getElementById('qrInput').value = decodedText;
-      document.getElementById('qrInput').dispatchEvent(new Event('input'));
-    }
+  currentScanner = startCombinedScanner('scannerContainer', (decodedText) => {
     closeScannerModal();
-  };
-
-  const scannerFn = type === 'serial' ? startBarcodeScanner : startQrScanner;
-  currentScanner = scannerFn('scannerContainer', onResult, (err) => {
-    console.error('Scanner error:', err);
-  });
+    handleScan(decodedText);
+  }, (err) => console.error('Scanner error:', err));
 }
 
-document.getElementById('openSerialScannerBtn').addEventListener('click', () => openScanner('serial'));
-document.getElementById('openQrScannerBtn').addEventListener('click', () => openScanner('qr'));
+document.getElementById('openCameraScannerBtn').addEventListener('click', openScanner);
 
 async function closeScannerModal() {
   scannerModal.classList.remove('open');
@@ -422,79 +443,74 @@ document.getElementById('closeScannerBtn').addEventListener('click', closeScanne
 
 // =========================================================
 // Main Comparison Logic
+// النظام بياخد كل الأكواد اللي اتسكانت للوحدة دي، وبيجرب لكل شرط
+// أنهي كود من دول (كامل أو بعد الاستخراج) بيحقق الشرط - من غير ما
+// الفني يحدد هو نفسه "ده سيريال" أو "ده QR"
 // =========================================================
-document.getElementById('checkBtn').addEventListener('click', runComparison);
-
 async function runComparison() {
-  const stationId = document.getElementById('stationSelect').value;
-  const serial = document.getElementById('serialInput').value.trim();
-  const qr = document.getElementById('qrInput').value.trim();
+  if (!currentStation) { resetScanBuffer(); return; }
+  const stationId = currentStation.id;
+  const codes = [...scanBuffer];
 
-  // Validation
-  if (!stationId) { alert('⚠️ اختر محطة الفحص أولاً'); return; }
-  if (!serial) { alert('⚠️ اكتب أو امسح سيريال المنتج'); return; }
-  if (!qr) { alert('⚠️ اكتب أو امسح QR Code'); return; }
-  if (currentConditions.length === 0) { alert('⚠️ لا توجد شروط مضافة لهذه المحطة'); return; }
+  if (currentConditions.length === 0) {
+    alert('⚠️ لا توجد شروط مضافة لهذه المحطة');
+    resetScanBuffer();
+    return;
+  }
 
-  const btn = document.getElementById('checkBtn');
-  btn.disabled = true;
-  btn.textContent = '⏳ جاري التحقق...';
+  document.getElementById('unifiedScanInput').disabled = true;
 
   try {
-    // Build condition results
+    const { data: allRefRows } = await sbClient
+      .from('comparison_reference_data')
+      .select('*')
+      .eq('station_id', stationId);
+
     const conditionResults = [];
     const scannedValues = {};
     let overallResult = 'ok';
     let mismatchDetails = [];
 
     for (const condition of currentConditions) {
-      const serialExtract = extractSubstring(serial, condition.extract_start, condition.extract_end);
-      const qrExtract = extractSubstring(qr, condition.extract_start, condition.extract_end);
-
-      scannedValues[condition.order_index] = serialExtract;
+      const attempts = codes.map(code =>
+        condition.extract_start ? extractSubstring(code, condition.extract_start, condition.extract_end) : code
+      );
 
       let match = false;
-      let detail = '';
+      let matchedValue = attempts.find(a => a) || null;
       let expectedValue = null;
+      let detail = '';
 
       if (condition.comparison_type === 'peer') {
-        // Compare with another condition's extracted value from serial
         const peerCondition = currentConditions.find(c => c.order_index === condition.peer_condition_order);
-        const peerExtract = peerCondition ? extractSubstring(serial, peerCondition.extract_start, peerCondition.extract_end) : null;
-
-        match = serialExtract === peerExtract;
-        expectedValue = peerExtract;
-        detail = match ? 'مطابق' : `متوقع: "${peerExtract || 'N/A'}" | موجود: "${serialExtract || 'N/A'}"`;
-
-        if (!match) {
-          overallResult = 'ng';
-          mismatchDetails.push(`${condition.name}: ${serialExtract} ≠ ${peerExtract}`);
+        outer:
+        for (const code1 of codes) {
+          const v1 = condition.extract_start ? extractSubstring(code1, condition.extract_start, condition.extract_end) : code1;
+          if (!v1) continue;
+          for (const code2 of codes) {
+            const v2 = peerCondition && peerCondition.extract_start ? extractSubstring(code2, peerCondition.extract_start, peerCondition.extract_end) : code2;
+            if (v2 && v1 === v2) { match = true; matchedValue = v1; expectedValue = v2; break outer; }
+          }
         }
+        detail = match ? 'مطابق' : 'لم يتم إيجاد تطابق بين الأكواد المسكونة';
+        if (!match) { overallResult = 'ng'; mismatchDetails.push(`${condition.name}: عدم تطابق`); }
 
       } else if (condition.comparison_type === 'database') {
-        // Compare with reference database
-        const { data: refData } = await sbClient
-          .from('comparison_reference_data')
-          .select('*')
-          .eq('station_id', stationId)
-          .eq(`expected_values->>${condition.order_index}`, serialExtract)
-          .limit(1);
-
-        match = refData && refData.length > 0;
-        expectedValue = match ? refData[0].expected_values[condition.order_index] : null;
-        detail = match ? 'موجود في قاعدة البيانات' : `غير موجود في القاعدة المرجعية`;
-
-        if (!match) {
-          overallResult = 'ng';
-          mismatchDetails.push(`${condition.name}: ${serialExtract} غير موجود في DB`);
+        for (const val of attempts) {
+          if (!val) continue;
+          const found = (allRefRows || []).find(r => String(r.expected_values?.[condition.order_index]) === String(val));
+          if (found) { match = true; matchedValue = val; expectedValue = found.expected_values[condition.order_index]; break; }
         }
+        detail = match ? 'موجود في قاعدة البيانات' : 'غير موجود في القاعدة المرجعية';
+        if (!match) { overallResult = 'ng'; mismatchDetails.push(`${condition.name}: ${matchedValue || 'N/A'} غير موجود في DB`); }
       }
 
+      scannedValues[condition.order_index] = matchedValue;
       conditionResults.push({
         condition_id: condition.id,
         condition_name: condition.name,
         order_index: condition.order_index,
-        extracted_value: serialExtract,
+        extracted_value: matchedValue,
         expected_value: expectedValue,
         comparison_type: condition.comparison_type,
         match: match,
@@ -502,12 +518,21 @@ async function runComparison() {
       });
     }
 
-    // Save log
+    // فحص حالة العيوب: بنجرب كل كود اتسكان (مش لازم نعرف مسبقًا أنهي كود هو السيريال)
+    let defectFlag = null;
+    for (const code of codes) {
+      const flag = await checkDefectStatus(code);
+      if (flag === 'scrap') { defectFlag = 'scrap'; break; }
+      if (flag === 'pending') defectFlag = 'pending';
+    }
+
+    // Save log (بنحتفظ بالأكواد الخام كمان تحت مفتاح _raw عشان المراجعة لاحقًا)
     const logPayload = {
       station_id: stationId,
       station_name: currentStation.name,
-      scanned_values: scannedValues,
+      scanned_values: { ...scannedValues, _raw: codes },
       result: overallResult,
+      defect_flag: defectFlag,
       mismatch_details: mismatchDetails.join('; '),
       condition_results: conditionResults,
       performed_by: currentUser.id,
@@ -522,8 +547,8 @@ async function runComparison() {
       console.warn('فشل حفظ السجل:', logError);
     }
 
-    // Show result
-    showResult(overallResult, conditionResults, serial, qr);
+    // Show result (النتيجة النهائية بتاخد بالها من حالة العيب كمان، أولوية: سكراب > NG > غير موجود > معلق > OK)
+    showResult(overallResult, conditionResults, codes, defectFlag);
 
     // Update stats
     updateStats(overallResult);
@@ -535,35 +560,61 @@ async function runComparison() {
     console.error('خطأ في الفحص:', err);
     alert('❌ حدث خطأ أثناء الفحص: ' + err.message);
   } finally {
-    btn.disabled = false;
-    btn.textContent = '🔎 تنفيذ الفحص';
+    document.getElementById('unifiedScanInput').disabled = false;
+    scanBuffer = [];
+    renderScanProgress();
   }
 }
 
 // =========================================================
 // Show Result Overlay
 // =========================================================
-function showResult(result, conditionResults, serial, qr) {
+function showResult(result, conditionResults, codes, defectFlag) {
   const overlay = document.getElementById('resultOverlay');
   const icon = document.getElementById('resultIcon');
   const text = document.getElementById('resultText');
   const sub = document.getElementById('resultSub');
   const detail = document.getElementById('resultDetail');
 
-  overlay.className = 'result-overlay show ' + result;
+  // الأولوية في العرض: سكراب > NG (شامل "غير موجود في قاعدة البيانات") > معلق (لسه من غير قرار) > OK
+  // ملحوظة: النتيجة دي دايمًا حية (بتتحسب من جديد كل سكان) - لو المشكلة لسه موجودة هتفضل تظهر
+  // لحد ما حد يعدّل الحالة من نظام تسجيل العيوب أو يضيف القيمة الناقصة في القاعدة المرجعية
+  let displayState = result;
+  if (defectFlag === 'scrap') displayState = 'scrap';
+  else if (result === 'ok' && defectFlag === 'pending') displayState = 'pending_defect';
 
-  if (result === 'ok') {
-    icon.textContent = '✔';
-    text.textContent = 'OK';
-    sub.textContent = '✅ جميع الشروط مطابقة — المنتج سليم';
-  } else if (result === 'ng') {
+  overlay.className = 'result-overlay show ' + displayState;
+
+  if (displayState === 'scrap') {
+    icon.textContent = '💀';
+    text.textContent = 'سكراب';
+    sub.textContent = '🚫 الوحدة دي مقرر إنها سكراب — لازم تتحول ولا تكمل على الخط';
+  } else if (displayState === 'ng') {
     icon.textContent = '✘';
     text.textContent = 'NG';
     sub.textContent = '❌ يوجد عدم مطابقة — يحتاج مراجعة';
-  } else {
+  } else if (displayState === 'undefined') {
     icon.textContent = '⚠';
     text.textContent = 'غير محدد';
     sub.textContent = '⚠️ لا توجد شروط مفعلة';
+  } else if (displayState === 'pending_defect') {
+    icon.textContent = '⏳';
+    text.textContent = 'لم يتم الإصلاح';
+    sub.textContent = '⚠️ فيه عيب مسجل على الوحدة دي ولسه معلق (لم يُتخذ قرار)';
+  } else {
+    icon.textContent = '✔';
+    text.textContent = 'OK';
+    sub.textContent = '✅ جميع الشروط مطابقة — المنتج سليم';
+  }
+
+  // زرار تسجيل موديل ناقص من قاعدة البيانات المرجعية - للأدمن/المشرف العام بس، ولو فيه شرط مش موجود فعلاً
+  const missingConditions = conditionResults.filter(cr => cr.comparison_type === 'database' && !cr.match);
+  const registerBtnWrap = document.getElementById('registerMissingWrap');
+  if (isFullAccessUser && missingConditions.length > 0 && displayState === 'ng') {
+    registerBtnWrap.style.display = 'block';
+    registerBtnWrap.dataset.missing = JSON.stringify(missingConditions.map(cr => ({ order_index: cr.order_index, value: cr.extracted_value })));
+  } else {
+    registerBtnWrap.style.display = 'none';
   }
 
   // Build detail table
@@ -592,17 +643,19 @@ function showResult(result, conditionResults, serial, qr) {
 
   detail.innerHTML = `
     <div class="detail-row">
-      <span class="detail-label">السيريال الكامل:</span>
-      <span class="detail-value" style="direction:ltr;">${serial}</span>
-    </div>
-    <div class="detail-row">
-      <span class="detail-label">QR Code:</span>
-      <span class="detail-value" style="direction:ltr;">${qr}</span>
+      <span class="detail-label">الأكواد اللي اتسكانت:</span>
+      <span class="detail-value" style="direction:ltr;">${codes.join(' | ')}</span>
     </div>
     <div class="detail-row">
       <span class="detail-label">المحطة:</span>
       <span class="detail-value">${currentStation.name}</span>
     </div>
+    ${defectFlag ? `
+    <div class="detail-row">
+      <span class="detail-label">حالة العيوب المسجلة:</span>
+      <span class="detail-value ${defectFlag === 'scrap' ? 'mismatch' : ''}">${defectFlag === 'scrap' ? '🗑 سكراب' : '⏳ معلق (لم يُتخذ قرار)'}</span>
+    </div>
+    ` : ''}
     <div style="margin-top:12px;">
       <table class="condition-results">
         <thead>
@@ -622,12 +675,34 @@ function showResult(result, conditionResults, serial, qr) {
 
 document.getElementById('resultCloseBtn').addEventListener('click', () => {
   document.getElementById('resultOverlay').classList.remove('show');
-  // Clear inputs for next scan
-  document.getElementById('serialInput').value = '';
-  document.getElementById('qrInput').value = '';
-  document.getElementById('serialExtractPreview').style.display = 'none';
-  document.getElementById('qrExtractPreview').style.display = 'none';
-  document.getElementById('serialInput').focus();
+  document.getElementById('registerMissingWrap').style.display = 'none';
+  resetScanBuffer();
+});
+
+// تسجيل موديل ناقص من قاعدة البيانات المرجعية مباشرة من شاشة النتيجة (أدمن/مشرف عام بس)
+document.getElementById('registerMissingBtn').addEventListener('click', async () => {
+  const wrap = document.getElementById('registerMissingWrap');
+  const missing = JSON.parse(wrap.dataset.missing || '[]');
+  if (!currentStation || missing.length === 0) return;
+
+  if (!confirm('هيتم تسجيل القيم دي كموديل جديد صحيح في قاعدة بيانات المحطة. متابعة؟')) return;
+
+  const expectedValues = {};
+  missing.forEach(m => { expectedValues[m.order_index] = m.value; });
+
+  const btn = document.getElementById('registerMissingBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ جاري التسجيل...';
+
+  const { error } = await sbClient.from('comparison_reference_data')
+    .insert([{ station_id: currentStation.id, expected_values: expectedValues }]);
+
+  btn.disabled = false;
+  btn.textContent = '➕ سجّل القيمة دي كموديل صحيح جديد';
+
+  if (error) { alert('❌ فشل التسجيل: ' + error.message); return; }
+  alert('✅ تم تسجيل القيمة كموديل صحيح جديد — هتتقبل من دلوقتي');
+  wrap.style.display = 'none';
 });
 
 // =========================================================
@@ -723,13 +798,6 @@ async function loadRecentLogs() {
   }
 }
 
-// Enter key handling
-document.getElementById('serialInput').addEventListener('keypress', (e) => {
-  if (e.key === 'Enter') document.getElementById('qrInput').focus();
-});
-document.getElementById('qrInput').addEventListener('keypress', (e) => {
-  if (e.key === 'Enter') runComparison();
-});
 </script>
 </body>
 </html>
