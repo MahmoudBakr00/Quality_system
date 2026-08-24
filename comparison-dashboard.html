@@ -92,8 +92,7 @@ td { padding: 8px; text-align: center; border-bottom: 1px solid #334155; }
 <h1 style="color:#60a5fa; margin-bottom:16px;">🔍 نظام مقارنة السيريال/الباركود</h1>
 
 <div class="tabs">
-<button class="tab-btn active" data-tab="logsTab">📋 سجل المقارنات</button>
-<button class="tab-btn" data-tab="stationsTab" id="stationsTabBtn" style="display:none;">⚙️ إدارة المحطات</button>
+<a href="dashboard.html" class="tab-btn" style="text-decoration:none; display:inline-block;">⬅ لوحة التحكم الرئيسية</a>
 </div>
 
 <div class="tab-content active" id="logsTab">
@@ -232,48 +231,28 @@ async function init() {
   renderNotificationBell('notifBellWrap', auth.user.id);
 
   if (isFullAccess) {
-    document.getElementById('stationsTabBtn').style.display = 'inline-block';
     document.getElementById('logsCheckboxHeaderCell').style.display = 'table-cell';
     document.getElementById('deleteSelectedLogsBtn').style.display = 'inline-block';
   }
 
-  loadStationsForFilter();
-  loadLogs();
-  if (isFullAccess) loadStationsManagement();
+  // تحديد أي محتوى يظهر بناءً على رابط الصفحة (?tab=stations) بدل زرار تبديل داخل نفس الصفحة
+  const params = new URLSearchParams(window.location.search);
+  const wantsStations = params.get('tab') === 'stations';
+
+  if (wantsStations && isFullAccess) {
+    document.title = 'إدارة محطات المقارنات - نظام تسجيل العيوب';
+    document.getElementById('logsTab').style.setProperty('display', 'none', 'important');
+    document.getElementById('logsTab').classList.remove('active');
+    const stationsEl = document.getElementById('stationsTab');
+    stationsEl.classList.add('active');
+    stationsEl.style.setProperty('display', 'block', 'important');
+    loadStationsManagement();
+  } else {
+    loadStationsForFilter();
+    loadLogs();
+  }
 }
 init().catch(err => showFatalErrorBanner('فشل تحميل الصفحة: ' + err.message));
-
-document.querySelectorAll('.tab-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    try {
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.tab-content').forEach(c => {
-        c.classList.remove('active');
-        // إجبار الإخفاء بالـ inline style مباشرة (أقوى من أي تعارض CSS محتمل)
-        c.style.setProperty('display', 'none', 'important');
-      });
-      btn.classList.add('active');
-      const target = document.getElementById(btn.dataset.tab);
-      if (!target) { showFatalErrorBanner('لم يتم إيجاد المحتوى المرتبط بالتبويب: ' + btn.dataset.tab); return; }
-      target.classList.add('active');
-      // إجبار الإظهار بالـ inline style مباشرة بدل ما نعتمد على الكلاس بس
-      target.style.setProperty('display', 'block', 'important');
-      target.style.setProperty('visibility', 'visible', 'important');
-      target.style.setProperty('opacity', '1', 'important');
-      target.style.setProperty('height', 'auto', 'important');
-      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      // تسجيل تلقائي في الكونسول للتشخيص - يظهر من غير ما تحتاج تكتب أي أمر
-      console.log('[تبديل تبويب]', btn.dataset.tab, {
-        classList: target.className,
-        computedDisplay: getComputedStyle(target).display,
-        offsetHeight: target.offsetHeight,
-        childrenCount: target.children.length
-      });
-    } catch (err) {
-      showFatalErrorBanner('خطأ عند تبديل التبويب: ' + err.message);
-    }
-  });
-});
 
 async function loadStationsForFilter() {
   const { data } = await sbClient.from('comparison_stations').select('id, name').order('name');
