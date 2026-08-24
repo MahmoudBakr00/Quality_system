@@ -14,6 +14,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
 body { background: #0f172a; padding: 20px; color: #f1f5f9; }
@@ -49,6 +50,34 @@ td { padding: 8px; text-align: center; border-bottom: 1px solid #334155; }
 .user-check-list { max-height: 150px; overflow-y: auto; background: #0f172a; border-radius: 8px; padding: 8px; margin-top: 6px; }
 .user-check-list label { display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 4px 0; font-weight: normal; }
 .user-check-list input { width: auto; }
+
+/* معالج إعداد المحطة الجديدة */
+.setup-choice { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.setup-choice-btn { flex: 1; min-width: 160px; background: #0f172a; border: 1px solid #334155; border-radius: 10px; padding: 16px; text-align: center; cursor: pointer; color: #f1f5f9; }
+.setup-choice-btn:hover { background: #1e2b40; border-color: #3b82f6; }
+.setup-choice-btn .ic { font-size: 26px; margin-bottom: 6px; }
+.wizard-panel { background: #0f172a; border: 1px solid #3b82f6; border-radius: 10px; padding: 14px; margin-top: 10px; }
+.wizard-panel h4 { color: #60a5fa; font-size: 13px; margin-bottom: 10px; }
+.wizard-cond-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.wizard-cond-chip { background: #334155; border-radius: 16px; padding: 5px 10px; font-size: 11px; display: inline-flex; align-items: center; gap: 6px; }
+.wizard-cond-chip button { background: none; border: none; color: #f87171; cursor: pointer; font-weight: bold; }
+.wizard-type-row { display: flex; gap: 14px; margin: 6px 0 10px; font-size: 12px; }
+.wizard-type-row label { display: flex; align-items: center; gap: 5px; font-weight: normal; color: #e2e8f0; margin: 0; }
+.wizard-extract-row { display: none; gap: 8px; }
+.wizard-extract-row.show { display: flex; }
+.wizard-scan-row { display: flex; gap: 8px; margin-top: 8px; }
+.wizard-scan-row input { flex: 1; }
+.wizard-scan-btn { background: #8b5cf6; color: white; border: none; padding: 0 14px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: bold; white-space: nowrap; }
+.wizard-preview { color: #fbbf24; font-family: monospace; font-size: 12px; margin-top: 6px; direction: ltr; text-align: right; }
+.wizard-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+#scannerModalDash { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 200; align-items: center; justify-content: center; }
+#scannerModalDash.open { display: flex; }
+.scanner-box { background: #1e293b; border-radius: 14px; padding: 20px; width: 90%; max-width: 400px; }
+.scanner-box h3 { color: #60a5fa; margin-bottom: 14px; text-align: center; font-size: 15px; }
+.scanner-close { width: 100%; margin-top: 14px; padding: 10px; background: #64748b; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
+.register-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.register-row label { min-width: 140px; margin: 0; font-size: 12px; }
+.register-row input { flex: 1; }
 </style>
 </head>
 <body>
@@ -133,6 +162,14 @@ td { padding: 8px; text-align: center; border-bottom: 1px solid #334155; }
 
 </div>
 
+<div id="scannerModalDash">
+  <div class="scanner-box">
+    <h3 id="scannerDashTitle">📷 وجّه الكاميرا</h3>
+    <div id="scannerContainerDash"></div>
+    <button class="scanner-close" id="closeScannerDashBtn">إغلاق</button>
+  </div>
+</div>
+
 <script src="shared.js"></script>
 <script>
 let currentUser = null;
@@ -140,6 +177,29 @@ let currentRole = null;
 let isFullAccess = false;
 let allStationsCache = [];
 let currentLogsCache = [];
+
+// =========================================================
+// سكانر عام (مستخدم في معالج الشروط وفي تسجيل قيم مرجعية جديدة)
+// =========================================================
+let dashScannerInstance = null;
+function openDashScanner(onResult) {
+  const modal = document.getElementById('scannerModalDash');
+  modal.classList.add('open');
+  dashScannerInstance = startCombinedScanner('scannerContainerDash', (decodedText) => {
+    onResult(decodedText);
+    closeDashScanner();
+  }, (err) => console.error('Scanner error:', err));
+}
+async function closeDashScanner() {
+  document.getElementById('scannerModalDash').classList.remove('open');
+  if (dashScannerInstance) { await dashScannerInstance.stop(); dashScannerInstance = null; }
+}
+document.getElementById('closeScannerDashBtn').addEventListener('click', closeDashScanner);
+
+function extractPreview(str, start, end) {
+  if (!str || !start || !end) return null;
+  return str.substring(start - 1, end);
+}
 
 async function init() {
   const auth = await requireAuth();
@@ -246,12 +306,13 @@ function renderLogsTable() {
   }
 
   const resultText = { ok: '✅ مطابق', ng: '❌ غير مطابق', undefined: '⚠️ غير معرّف' };
+  const defectFlagText = { scrap: '🗑 سكراب', pending: '⏳ معلق' };
   tbody.innerHTML = displayedLogs.map(log => `
     <tr>
       ${isFullAccess ? `<td onclick="event.stopPropagation()"><input type="checkbox" class="log-row-checkbox" data-id="${log.id}" /></td>` : ''}
       <td>${log.station_name || '-'}</td>
       <td style="font-size:11px; text-align:right;">${Object.values(log.scanned_values || {}).join(' | ')}</td>
-      <td><span class="result-badge ${log.result}">${resultText[log.result]}</span></td>
+      <td><span class="result-badge ${log.result}">${resultText[log.result]}</span> ${log.defect_flag ? `<span class="result-badge ${log.defect_flag === 'scrap' ? 'ng' : 'undefined'}">${defectFlagText[log.defect_flag]}</span>` : ''}</td>
       <td style="font-size:11px;">${log.mismatch_details || '-'}</td>
       <td>${log.performed_by_email ? log.performed_by_email.split('@')[0] : '-'}</td>
       <td style="font-size:11px;">${formatDate(log.created_at)}</td>
@@ -458,6 +519,12 @@ async function loadStationsList() {
         <button class="small-btn danger" data-station-id="${s.id}" onclick="deleteComparisonStation('${s.id}')">🗑 حذف المحطة</button>
       </div>
 
+      <div style="display:flex; align-items:center; gap:8px; margin-top:8px; font-size:12px; color:#94a3b8;">
+        <label style="margin:0;">📷 عدد الأكواد المطلوب سكانها لكل وحدة على الخط:</label>
+        <input type="number" min="1" max="5" value="${s.scans_per_unit || 1}" style="width:60px; padding:6px;" id="scansPerUnit-${s.id}" />
+        <button class="small-btn" style="padding:5px 10px; font-size:11px;" onclick="saveScansPerUnit('${s.id}')">💾</button>
+      </div>
+
       <label>👥 المستخدمين المسموح لهم بالمحطة دي:</label>
       <div class="user-check-list" id="users-${s.id}">
         ${allUsersCache.map(u => `
@@ -465,19 +532,38 @@ async function loadStationsList() {
         `).join('')}
       </div>
 
+      ${conditions.length === 0 ? `
+      <div style="margin-top:14px;">
+        <label>🧙 المحطة دي لسه من غير شروط — اختار طريقة الإعداد:</label>
+        <div class="setup-choice">
+          <div class="setup-choice-btn" onclick="openExcelSetup('${s.id}')">
+            <div class="ic">📊</div>
+            <div>رفع إكسيل<br><small style="color:#94a3b8;">وتحديد كل عمود شرطه إيه مرة واحدة</small></div>
+          </div>
+          <div class="setup-choice-btn" onclick="openScanWizard('${s.id}')">
+            <div class="ic">📷</div>
+            <div>إعداد بالسكان<br><small style="color:#94a3b8;">تضيف كل شرط وتسكانله قيمة فعلية</small></div>
+          </div>
+        </div>
+        <div id="setupArea-${s.id}"></div>
+      </div>
+      ` : `
       <label style="margin-top:14px;">📝 الشروط (بالترتيب):</label>
       <div id="conditions-${s.id}">
-        ${conditions.map(c => renderConditionRow(c)).join('') || '<div style="color:#64748b; font-size:12px;">لا يوجد شروط بعد</div>'}
+        ${conditions.map(c => renderConditionRow(c)).join('')}
       </div>
-      <button class="small-btn green" style="margin-top:8px;" onclick="addConditionRow('${s.id}')">➕ إضافة شرط جديد</button>
+      <button class="small-btn green" style="margin-top:8px;" onclick="addConditionRow('${s.id}')">➕ إضافة شرط جديد يدويًا</button>
 
       <label style="margin-top:14px;">📊 قاعدة البيانات المرجعية:</label>
       <div style="display:flex; gap:8px; align-items:center; margin-top:6px;">
         <input type="file" accept=".xlsx,.xls,.csv" id="refFile-${s.id}" style="flex:1;" />
-        <button class="small-btn" onclick="uploadReferenceData('${s.id}')">📊 رفع</button>
+        <button class="small-btn" onclick="uploadReferenceData('${s.id}')">📊 رفع إكسيل (إضافة صفوف)</button>
+        <button class="small-btn green" onclick="openRegisterValue('${s.id}')">📷 تسجيل موديل جديد بالسكان</button>
       </div>
       <div style="color:#64748b; font-size:11px; margin-top:6px;">الأعمدة بالترتيب: عمود لكل شرط يستخدم "مقارنة مع قاعدة البيانات" (بنفس ترتيب الشروط)</div>
       <div id="refCount-${s.id}" style="color:#93c5fd; font-size:12px; margin-top:6px;"></div>
+      <div id="registerArea-${s.id}"></div>
+      `}
     </div>
     `;
   }).join('');
@@ -562,6 +648,15 @@ async function deleteConditionRow(conditionId) {
   loadStationsList();
 }
 
+async function saveScansPerUnit(stationId) {
+  const val = parseInt(document.getElementById(`scansPerUnit-${stationId}`).value, 10);
+  if (!val || val < 1 || val > 5) { alert('⚠️ اكتب رقم من 1 إلى 5'); return; }
+  const { error } = await sbClient.from('comparison_stations').update({ scans_per_unit: val }).eq('id', stationId);
+  if (error) { alert('❌ ' + error.message); return; }
+  alert('✅ تم الحفظ');
+  loadStationsForFilter();
+}
+
 async function deleteComparisonStation(stationId) {
   if (!confirm('⚠️ متأكد من حذف المحطة دي؟ هيتحذف معاها كل الشروط وقاعدة البيانات المرجعية بتاعتها!')) return;
   await sbClient.from('comparison_stations').delete().eq('id', stationId);
@@ -615,6 +710,301 @@ async function uploadReferenceData(stationId) {
     alert('❌ فشل رفع الملف: ' + err.message);
     console.error(err);
   }
+}
+
+// =========================================================
+// معالج الإعداد بالإكسيل: تحديد شرط كل عمود مرة واحدة، ثم رفع البيانات
+// =========================================================
+const excelSetupState = {}; // stationId -> { rows: [][] }
+
+function openExcelSetup(stationId) {
+  document.getElementById(`setupArea-${stationId}`).innerHTML = `
+    <div class="wizard-panel">
+      <h4>📊 رفع إكسيل — الخطوة 1: اختر الملف</h4>
+      <input type="file" accept=".xlsx,.xls,.csv" id="excelSetupFile-${stationId}" />
+      <div class="wizard-actions">
+        <button class="small-btn" onclick="excelSetupPreview('${stationId}')">➡️ التالي: تحديد الأعمدة</button>
+        <button class="small-btn" style="background:#64748b;" onclick="closeSetupArea('${stationId}')">إلغاء</button>
+      </div>
+    </div>
+  `;
+}
+
+async function excelSetupPreview(stationId) {
+  const fileInput = document.getElementById(`excelSetupFile-${stationId}`);
+  const file = fileInput.files[0];
+  if (!file) { alert('⚠️ اختر ملف إكسيل أولاً'); return; }
+
+  const data = await file.arrayBuffer();
+  const workbook = XLSX.read(data, { type: 'array' });
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 })
+    .filter(r => r && r.length > 0 && r[0] !== undefined && r[0] !== null && String(r[0]).trim() !== '');
+
+  if (rows.length === 0) { alert('⚠️ الملف فاضي أو مفيش بيانات صالحة فيه'); return; }
+
+  excelSetupState[stationId] = { rows };
+  const colCount = rows[0].length;
+  const sampleRow = rows[0];
+
+  let colsHtml = '';
+  for (let i = 0; i < colCount; i++) {
+    colsHtml += `
+      <div class="condition-row" style="grid-template-columns:1fr 1fr 1fr;">
+        <input type="text" class="excel-col-name" placeholder="اسم الشرط (عمود ${i + 1})" />
+        <input type="text" class="excel-col-extract" placeholder="مدى استخراج وقت السكان (اختياري) مثل 4-11" />
+        <div style="font-size:11px; color:#94a3b8; direction:ltr; text-align:right;">مثال: ${sampleRow[i] ?? '-'}</div>
+      </div>
+    `;
+  }
+
+  document.getElementById(`setupArea-${stationId}`).innerHTML = `
+    <div class="wizard-panel">
+      <h4>📊 الخطوة 2: حدد شرط كل عمود (${colCount} عمود، ${rows.length} صف بيانات)</h4>
+      <div id="excelCols-${stationId}">${colsHtml}</div>
+      <div class="wizard-actions">
+        <button class="small-btn" onclick="excelSetupConfirm('${stationId}')">✅ تأكيد وربط الأعمدة ورفع البيانات</button>
+        <button class="small-btn" style="background:#64748b;" onclick="closeSetupArea('${stationId}')">إلغاء</button>
+      </div>
+    </div>
+  `;
+}
+
+async function excelSetupConfirm(stationId) {
+  const state = excelSetupState[stationId];
+  if (!state) return;
+
+  const colRows = document.querySelectorAll(`#excelCols-${stationId} .condition-row`);
+  const colsDef = Array.from(colRows).map(row => {
+    const name = row.querySelector('.excel-col-name').value.trim();
+    const extractRaw = row.querySelector('.excel-col-extract').value.trim();
+    let extractStart = null, extractEnd = null;
+    if (extractRaw.includes('-')) {
+      const parts = extractRaw.split('-').map(v => parseInt(v.trim(), 10));
+      if (!isNaN(parts[0]) && !isNaN(parts[1])) { extractStart = parts[0]; extractEnd = parts[1]; }
+    }
+    return { name, extractStart, extractEnd };
+  });
+
+  if (colsDef.some(c => !c.name)) { alert('⚠️ اكتب اسم لكل الأعمدة'); return; }
+
+  try {
+    const conditionsToInsert = colsDef.map((c, idx) => ({
+      station_id: stationId, order_index: idx + 1, name: c.name,
+      extract_start: c.extractStart, extract_end: c.extractEnd, comparison_type: 'database',
+    }));
+
+    const { data: insertedConditions, error: condErr } = await sbClient
+      .from('comparison_conditions').insert(conditionsToInsert).select('*').order('order_index');
+    if (condErr) throw condErr;
+
+    const rowsToInsert = state.rows.map(r => {
+      const expectedValues = {};
+      insertedConditions.forEach((c, idx) => {
+        const cellValue = r[idx];
+        if (cellValue !== undefined && cellValue !== null) {
+          expectedValues[c.order_index] = String(cellValue).trim();
+        }
+      });
+      return { station_id: stationId, expected_values: expectedValues };
+    });
+
+    const { error: refErr } = await sbClient.from('comparison_reference_data').insert(rowsToInsert);
+    if (refErr) throw refErr;
+
+    alert(`✅ تم إنشاء ${insertedConditions.length} شرط وإضافة ${rowsToInsert.length} صف بنجاح — المحطة جاهزة الآن`);
+    delete excelSetupState[stationId];
+    loadStationsList();
+  } catch (err) {
+    alert('❌ فشل الإعداد: ' + err.message);
+    console.error(err);
+  }
+}
+
+function closeSetupArea(stationId) {
+  delete excelSetupState[stationId];
+  delete scanWizardState[stationId];
+  document.getElementById(`setupArea-${stationId}`).innerHTML = '';
+}
+
+// =========================================================
+// معالج الإعداد بالسكان: إضافة شرط شرط، كل واحد بقيمته المرجعية من سكان فعلي
+// =========================================================
+const scanWizardState = {}; // stationId -> [{name, extract_start, extract_end, value}]
+
+function openScanWizard(stationId) {
+  scanWizardState[stationId] = scanWizardState[stationId] || [];
+  renderScanWizard(stationId);
+}
+
+function renderScanWizard(stationId) {
+  const items = scanWizardState[stationId] || [];
+  document.getElementById(`setupArea-${stationId}`).innerHTML = `
+    <div class="wizard-panel">
+      <h4>📷 معالج الإعداد بالسكان — أضف كل شرط بقيمته المرجعية (من نفس الوحدة الفعلية)</h4>
+      <div class="wizard-cond-chips" id="wizardChips-${stationId}">
+        ${items.length === 0 ? '<span style="color:#64748b; font-size:12px;">لسه معملتش أي شرط في الجلسة دي</span>' :
+          items.map((it, idx) => `
+            <span class="wizard-cond-chip">
+              ${idx + 1}. ${it.name} ${it.extract_start ? `(${it.extract_start}-${it.extract_end})` : ''} = "${it.value}"
+              <button onclick="removeWizardCondition('${stationId}', ${idx})">✕</button>
+            </span>
+          `).join('')}
+      </div>
+
+      <label>اسم الشرط</label>
+      <input type="text" id="wzName-${stationId}" placeholder="مثال: كود الموديل" />
+
+      <div class="wizard-type-row">
+        <label><input type="radio" name="wzType-${stationId}" value="full" checked onchange="toggleWizardExtract('${stationId}')" /> مقارنة / تحقق (القيمة كاملة)</label>
+        <label><input type="radio" name="wzType-${stationId}" value="extract" onchange="toggleWizardExtract('${stationId}')" /> استخراج (جزء من القيمة)</label>
+      </div>
+
+      <div class="wizard-extract-row" id="wzExtractRow-${stationId}">
+        <input type="number" id="wzStart-${stationId}" placeholder="من (رقم الحرف)" min="1" oninput="updateWizardPreview('${stationId}')" />
+        <input type="number" id="wzEnd-${stationId}" placeholder="إلى (رقم الحرف)" min="1" oninput="updateWizardPreview('${stationId}')" />
+      </div>
+
+      <label style="margin-top:10px;">القيمة المرجعية (اسكانها من الوحدة الفعلية أو اكتبها يدويًا)</label>
+      <div class="wizard-scan-row">
+        <input type="text" id="wzValue-${stationId}" placeholder="سكان أو كتابة يدوية" oninput="updateWizardPreview('${stationId}')" />
+        <button type="button" class="wizard-scan-btn" onclick="openDashScanner(v => { document.getElementById('wzValue-${stationId}').value = v; updateWizardPreview('${stationId}'); })">📷 سكان</button>
+      </div>
+      <div class="wizard-preview" id="wzPreview-${stationId}"></div>
+
+      <div class="wizard-actions">
+        <button class="small-btn green" onclick="addWizardCondition('${stationId}')">➕ إضافة الشرط ده</button>
+        ${items.length > 0 ? `<button class="small-btn" onclick="finishScanWizard('${stationId}')">✅ إنهاء الإعداد وتفعيل المحطة</button>` : ''}
+        <button class="small-btn" style="background:#64748b;" onclick="closeSetupArea('${stationId}')">إلغاء الكل</button>
+      </div>
+    </div>
+  `;
+}
+
+function toggleWizardExtract(stationId) {
+  const type = document.querySelector(`input[name="wzType-${stationId}"]:checked`).value;
+  document.getElementById(`wzExtractRow-${stationId}`).classList.toggle('show', type === 'extract');
+  updateWizardPreview(stationId);
+}
+
+function updateWizardPreview(stationId) {
+  const type = document.querySelector(`input[name="wzType-${stationId}"]:checked`)?.value;
+  const value = document.getElementById(`wzValue-${stationId}`).value.trim();
+  const preview = document.getElementById(`wzPreview-${stationId}`);
+  if (type === 'extract') {
+    const start = parseInt(document.getElementById(`wzStart-${stationId}`).value, 10);
+    const end = parseInt(document.getElementById(`wzEnd-${stationId}`).value, 10);
+    const extracted = extractPreview(value, start, end);
+    preview.textContent = value ? `القيمة اللي هتتسجل كمرجع: "${extracted || 'N/A'}"` : '';
+  } else {
+    preview.textContent = value ? `القيمة اللي هتتسجل كمرجع: "${value}"` : '';
+  }
+}
+
+function addWizardCondition(stationId) {
+  const name = document.getElementById(`wzName-${stationId}`).value.trim();
+  const type = document.querySelector(`input[name="wzType-${stationId}"]:checked`).value;
+  const rawValue = document.getElementById(`wzValue-${stationId}`).value.trim();
+
+  if (!name) { alert('⚠️ اكتب اسم الشرط'); return; }
+  if (!rawValue) { alert('⚠️ اسكان أو اكتب القيمة المرجعية'); return; }
+
+  let extractStart = null, extractEnd = null, value = rawValue;
+  if (type === 'extract') {
+    extractStart = parseInt(document.getElementById(`wzStart-${stationId}`).value, 10);
+    extractEnd = parseInt(document.getElementById(`wzEnd-${stationId}`).value, 10);
+    if (!extractStart || !extractEnd || extractEnd < extractStart) { alert('⚠️ حدد مدى استخراج صحيح (من - إلى)'); return; }
+    value = extractPreview(rawValue, extractStart, extractEnd);
+    if (!value) { alert('⚠️ المدى المحدد أطول من القيمة اللي اتكتبت'); return; }
+  }
+
+  scanWizardState[stationId].push({ name, extract_start: extractStart, extract_end: extractEnd, value });
+  renderScanWizard(stationId);
+}
+
+function removeWizardCondition(stationId, idx) {
+  scanWizardState[stationId].splice(idx, 1);
+  renderScanWizard(stationId);
+}
+
+async function finishScanWizard(stationId) {
+  const items = scanWizardState[stationId] || [];
+  if (items.length === 0) { alert('⚠️ لازم تضيف شرط واحد على الأقل'); return; }
+  if (!confirm(`هيتم إنشاء ${items.length} شرط وتسجيل أول قيمة مرجعية للمحطة. متابعة؟`)) return;
+
+  try {
+    const conditionsToInsert = items.map((it, idx) => ({
+      station_id: stationId, order_index: idx + 1, name: it.name,
+      extract_start: it.extract_start, extract_end: it.extract_end, comparison_type: 'database',
+    }));
+
+    const { data: insertedConditions, error: condErr } = await sbClient
+      .from('comparison_conditions').insert(conditionsToInsert).select('*').order('order_index');
+    if (condErr) throw condErr;
+
+    const expectedValues = {};
+    insertedConditions.forEach((c, idx) => { expectedValues[c.order_index] = items[idx].value; });
+
+    const { error: refErr } = await sbClient.from('comparison_reference_data')
+      .insert([{ station_id: stationId, expected_values: expectedValues }]);
+    if (refErr) throw refErr;
+
+    alert('✅ تم إعداد المحطة بنجاح، وبتسحب داتا طبيعي دلوقتي');
+    delete scanWizardState[stationId];
+    loadStationsList();
+  } catch (err) {
+    alert('❌ فشل إنهاء الإعداد: ' + err.message);
+    console.error(err);
+  }
+}
+
+// =========================================================
+// تسجيل قيمة مرجعية جديدة لمحطة عندها شروط بالفعل (موديل جديد نزل على الخط)
+// =========================================================
+async function openRegisterValue(stationId) {
+  const { data: conditions } = await sbClient.from('comparison_conditions')
+    .select('*').eq('station_id', stationId).eq('comparison_type', 'database').order('order_index');
+
+  if (!conditions || conditions.length === 0) {
+    alert('⚠️ المحطة دي مفيهاش شروط من نوع "مقارنة/تحقق"');
+    return;
+  }
+
+  document.getElementById(`registerArea-${stationId}`).innerHTML = `
+    <div class="wizard-panel">
+      <h4>📷 تسجيل موديل/قيمة جديدة — اسكان أو اكتب قيمة كل شرط</h4>
+      ${conditions.map(c => `
+        <div class="register-row">
+          <label>${c.order_index}. ${c.name}</label>
+          <input type="text" class="reg-value" data-order-index="${c.order_index}" placeholder="القيمة" />
+          <button type="button" class="wizard-scan-btn" onclick="openDashScanner(v => { document.querySelector('#registerArea-${stationId} .reg-value[data-order-index=\\'${c.order_index}\\']').value = v; })">📷</button>
+        </div>
+      `).join('')}
+      <div class="wizard-actions">
+        <button class="small-btn green" onclick="saveRegisteredValue('${stationId}')">💾 حفظ كقيمة صحيحة جديدة</button>
+        <button class="small-btn" style="background:#64748b;" onclick="document.getElementById('registerArea-${stationId}').innerHTML='';">إلغاء</button>
+      </div>
+    </div>
+  `;
+}
+
+async function saveRegisteredValue(stationId) {
+  const inputs = document.querySelectorAll(`#registerArea-${stationId} .reg-value`);
+  const expectedValues = {};
+  inputs.forEach(inp => {
+    const val = inp.value.trim();
+    if (val) expectedValues[inp.dataset.orderIndex] = val;
+  });
+
+  if (Object.keys(expectedValues).length === 0) { alert('⚠️ اكتب أو اسكان قيمة واحدة على الأقل'); return; }
+
+  const { error } = await sbClient.from('comparison_reference_data')
+    .insert([{ station_id: stationId, expected_values: expectedValues }]);
+
+  if (error) { alert('❌ فشل الحفظ: ' + error.message); return; }
+  alert('✅ تم تسجيل القيمة الجديدة بنجاح');
+  document.getElementById(`registerArea-${stationId}`).innerHTML = '';
+  loadStationsList();
 }
 </script>
 </body>
