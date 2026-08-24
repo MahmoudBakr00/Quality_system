@@ -404,6 +404,8 @@ async function checkDefectStatus(serial) {
       .select('status, action_taken')
       .eq('serial_number', serial);
 
+    console.log('[فحص حالة العيب]', JSON.stringify({ scanned: serial, foundRows: (data || []).length, data, error }));
+
     if (error || !data || data.length === 0) return null;
 
     if (data.some(d => d.status === 'rejected' && d.action_taken === 'scrap')) return 'scrap';
