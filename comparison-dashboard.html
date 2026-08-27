@@ -1211,9 +1211,26 @@ async function deleteReferenceDataRow(stationId, rowId) {
 // إصلاح تلقائي: بيعيد تطبيق مدى الاستخراج المحدد لكل شرط على كل القيم المخزنة
 // (لأي قيمة اتسجلت قبل كده كاملة من غير ما تتقص حسب مدى الاستخراج)
 async function fixReferenceDataExtraction(stationId) {
-  const cache = refDataCache[stationId];
-  if (!cache) return;
-  const { conditions, rows } = cache;
+  // بيجيب البيانات مباشرة من قاعدة البيانات (مش معتمد على أي حاجة متخزنة في المتصفح)
+  // عشان يشتغل حتى لو الصفحة اتحمّلت من فترة أو الجدول اتقفل وفتح تاني
+  let conditions, rows;
+  try {
+    const condRes = await sbClient.from('comparison_conditions')
+      .select('*').eq('station_id', stationId).eq('comparison_type', 'database').order('order_index');
+    if (condRes.error) throw condRes.error;
+    conditions = condRes.data || [];
+
+    const rowsRes = await sbClient.from('comparison_reference_data')
+      .select('*').eq('station_id', stationId);
+    if (rowsRes.error) throw rowsRes.error;
+    rows = rowsRes.data || [];
+  } catch (err) {
+    alert('❌ فشل تحميل البيانات: ' + err.message);
+    return;
+  }
+
+  if (conditions.length === 0) { alert('⚠️ المحطة دي مفيهاش شروط من نوع "مقارنة/تحقق"'); return; }
+  if (rows.length === 0) { alert('📭 لا توجد أي قيم مسجلة لهذه المحطة'); return; }
 
   const updates = [];
   rows.forEach(r => {
