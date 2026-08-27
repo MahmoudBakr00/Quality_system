@@ -679,7 +679,8 @@ function showResult(result, conditionResults, codes, defectFlag) {
   } else if (displayState === 'ng') {
     icon.textContent = '✘';
     text.textContent = 'NG';
-    sub.textContent = '❌ يوجد عدم مطابقة — يحتاج مراجعة';
+    const failedNames = conditionResults.filter(cr => !cr.match).map(cr => cr.condition_name);
+    sub.textContent = failedNames.length > 0 ? '❌ المشكلة في: ' + failedNames.join('، ') : '❌ يوجد عدم مطابقة';
   } else if (displayState === 'undefined') {
     icon.textContent = '⚠';
     text.textContent = 'غير محدد';
@@ -704,60 +705,35 @@ function showResult(result, conditionResults, codes, defectFlag) {
     registerBtnWrap.style.display = 'none';
   }
 
-  // Build detail table
-  const rows = conditionResults.map(cr => {
-    const statusClass = cr.match ? 'match' : 'mismatch';
-    const statusIcon = cr.match ? '✓' : '✗';
-    const statusText = cr.match ? 'مطابق' : 'غير مطابق';
+  // بدل الجدول الكامل بكل الشروط، بنوري بس المشكلة الفعلية (الشروط اللي فشلت) بشكل مباشر وواضح
+  const failedConditions = conditionResults.filter(cr => !cr.match);
+  let detailHtml = '';
 
-    let comparisonInfo = '';
-    if (cr.comparison_type === 'peer') {
-      comparisonInfo = `مقارنة مع شرط #${cr.condition_id}`;
-    } else {
-      comparisonInfo = 'مقارنة مع قاعدة البيانات';
-    }
+  if (displayState === 'ng' && failedConditions.length > 0) {
+    detailHtml += failedConditions.map(cr => {
+      const reason = cr.comparison_type === 'peer'
+        ? 'مش متطابق مع الشرط المرتبط بيه'
+        : 'مش موجودة في القاعدة المرجعية';
+      return `
+        <div class="detail-row">
+          <span class="detail-label">${cr.condition_name}:</span>
+          <span class="detail-value mismatch" style="direction:ltr;">"${cr.extracted_value || 'N/A'}" ${reason}</span>
+        </div>
+      `;
+    }).join('');
+  }
 
-    return `
-      <tr>
-        <td><strong>${cr.order_index}.</strong> ${cr.condition_name}</td>
-        <td class="${statusClass}">${statusIcon} ${statusText}</td>
-        <td style="font-family:monospace; direction:ltr;">${cr.extracted_value || 'N/A'}</td>
-        <td style="font-family:monospace; direction:ltr;">${cr.expected_value || 'N/A'}</td>
-        <td style="font-size:11px; color:rgba(255,255,255,0.7);">${comparisonInfo}</td>
-      </tr>
+  if (defectFlag) {
+    detailHtml += `
+      <div class="detail-row">
+        <span class="detail-label">حالة العيوب المسجلة:</span>
+        <span class="detail-value ${defectFlag === 'scrap' ? 'mismatch' : ''}">${defectFlag === 'scrap' ? '🗑 سكراب' : '⏳ معلق (لم يُتخذ قرار)'}</span>
+      </div>
     `;
-  }).join('');
+  }
 
-  detail.innerHTML = `
-    <div class="detail-row">
-      <span class="detail-label">الأكواد اللي اتسكانت:</span>
-      <span class="detail-value" style="direction:ltr;">${codes.join(' | ')}</span>
-    </div>
-    <div class="detail-row">
-      <span class="detail-label">المحطة:</span>
-      <span class="detail-value">${currentStation.name}</span>
-    </div>
-    ${defectFlag ? `
-    <div class="detail-row">
-      <span class="detail-label">حالة العيوب المسجلة:</span>
-      <span class="detail-value ${defectFlag === 'scrap' ? 'mismatch' : ''}">${defectFlag === 'scrap' ? '🗑 سكراب' : '⏳ معلق (لم يُتخذ قرار)'}</span>
-    </div>
-    ` : ''}
-    <div style="margin-top:12px;">
-      <table class="condition-results">
-        <thead>
-          <tr>
-            <th>الشرط</th>
-            <th>النتيجة</th>
-            <th>القيمة المستخرجة</th>
-            <th>القيمة المتوقعة</th>
-            <th>النوع</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>
-  `;
+  detail.innerHTML = detailHtml;
+  detail.style.display = detailHtml ? 'block' : 'none';
 }
 
 document.getElementById('resultCloseBtn').addEventListener('click', () => {
