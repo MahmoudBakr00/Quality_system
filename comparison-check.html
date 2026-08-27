@@ -68,6 +68,19 @@ select:focus, input:focus { outline: 2px solid #3b82f6; }
 .result-overlay button { background: white; color: #333; border: none; padding: 14px 40px; border-radius: 50px; font-size: 18px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.2); transition: all 0.2s; }
 .result-overlay button:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.3); }
 
+/* تناسب أفضل مع شاشات الموبايل الصغيرة */
+@media (max-width: 480px) {
+  body { padding: 12px; }
+  .result-overlay .result-icon { font-size: 4rem; margin-bottom: 10px; }
+  .result-overlay .result-text { font-size: 2.2rem; margin-bottom: 8px; }
+  .result-overlay .result-sub { font-size: 13px; margin-bottom: 16px; }
+  .result-overlay .result-detail { padding: 12px 14px; margin-bottom: 16px; }
+  .result-overlay .result-detail .detail-row { font-size: 12px; gap: 10px; }
+  .result-overlay button { padding: 12px 30px; font-size: 16px; }
+  .btn-check { font-size: 17px; padding: 14px; }
+  .view { padding: 18px; }
+}
+
 /* Scanner Modal */
 #scannerModal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 100; align-items: center; justify-content: center; }
 #scannerModal.open { display: flex; }
@@ -164,7 +177,10 @@ select:focus, input:focus { outline: 2px solid #3b82f6; }
     <div id="scanProgressWrap" style="display:none; margin: -10px 0 18px;">
       <div style="color:#94a3b8; font-size:12px; margin-bottom:6px;" id="scanProgressLabel"></div>
       <div id="scanBufferChips" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
-      <button type="button" id="resetScanBtn" style="background:#64748b; color:white; border:none; padding:6px 14px; border-radius:6px; font-size:12px; margin-top:8px; cursor:pointer;">🗑 إلغاء ومسح من جديد</button>
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <button type="button" id="finishScanNowBtn" style="background:#22c55e; color:white; border:none; padding:6px 14px; border-radius:6px; font-size:12px; cursor:pointer;">✅ تنفيذ الفحص بالأكواد دي</button>
+        <button type="button" id="resetScanBtn" style="background:#64748b; color:white; border:none; padding:6px 14px; border-radius:6px; font-size:12px; cursor:pointer;">🗑 إلغاء ومسح من جديد</button>
+      </div>
     </div>
   </div>
 
@@ -231,6 +247,10 @@ async function init() {
 }
 init();
 
+// فتح إذن تشغيل الصوت من أول تفاعل حقيقي للمستخدم مع الصفحة (متطلب من المتصفحات)
+document.addEventListener('click', () => getAudioCtx(), { once: true });
+document.addEventListener('keydown', () => getAudioCtx(), { once: true });
+
 let allStationsData = [];
 
 // =========================================================
@@ -282,21 +302,32 @@ function renderScanProgress() {
   const wrap = document.getElementById('scanProgressWrap');
   const label = document.getElementById('scanProgressLabel');
   const chips = document.getElementById('scanBufferChips');
+  const finishBtn = document.getElementById('finishScanNowBtn');
   const expected = currentStation ? (currentStation.scansPerUnit || 1) : 1;
 
-  if (!currentStation || expected <= 1) {
+  if (!currentStation || scanBuffer.length === 0) {
     wrap.style.display = 'none';
     return;
   }
 
   wrap.style.display = 'block';
-  label.textContent = `تم سكان ${scanBuffer.length} من ${expected} أكواد مطلوبة لهذه الوحدة`;
+  if (scanBuffer.length < expected) {
+    label.textContent = `⏳ تم سكان ${scanBuffer.length} من ${expected} أكواد مطلوبة — كمّل السكان أو دوس "تنفيذ الفحص" لو خلصت`;
+  } else {
+    label.textContent = `✅ تم سكان العدد المطلوب (${expected}) — جاري التنفيذ...`;
+  }
   chips.innerHTML = scanBuffer.map((code, i) => `
     <span class="condition-chip" style="direction:ltr;">${i + 1}. ${code}</span>
   `).join('');
+  // زرار التنفيذ اليدوي يفيد لو عايز يوقف قبل ما يوصل للعدد المتوقع، أو يزود العدد المتوقع محتاج له
+  finishBtn.style.display = scanBuffer.length < expected ? 'inline-block' : 'none';
 }
 
 document.getElementById('resetScanBtn').addEventListener('click', resetScanBuffer);
+document.getElementById('finishScanNowBtn').addEventListener('click', () => {
+  if (scanBuffer.length === 0) return;
+  runComparison();
+});
 
 async function handleScan(rawValue) {
   const value = (rawValue || '').trim();
@@ -310,7 +341,9 @@ async function handleScan(rawValue) {
 
   const expected = currentStation.scansPerUnit || 1;
   if (scanBuffer.length >= expected) {
-    await runComparison();
+    // مهلة قصيرة (نص ثانية) قبل تنفيذ الفحص فعليًا - فرصة أخيرة لو محتاج تلغي أو تضيف كود كمان
+    document.getElementById('unifiedScanInput').focus();
+    setTimeout(() => { if (scanBuffer.length >= expected) runComparison(); }, 400);
   } else {
     document.getElementById('unifiedScanInput').focus();
   }
@@ -393,6 +426,53 @@ function extractSubstring(str, start, end) {
 }
 
 // =========================================================
+// صوت تنبيه عند وجود مشكلة (NG/سكراب/معلق/غير موجود) - عشان يلفت
+// الانتباه حتى لو الفني مش شايف الشاشة في اللحظة دي. صوت OK هادئ ومختلف
+// =========================================================
+let audioCtxInstance = null;
+function getAudioCtx() {
+  if (!audioCtxInstance) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    audioCtxInstance = new AC();
+  }
+  if (audioCtxInstance.state === 'suspended') audioCtxInstance.resume();
+  return audioCtxInstance;
+}
+
+function beep(freq, durationMs, delayMs, volume) {
+  try {
+    const ctx = getAudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = freq;
+    gain.gain.value = volume || 0.15;
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    const startAt = ctx.currentTime + (delayMs || 0) / 1000;
+    osc.start(startAt);
+    osc.stop(startAt + durationMs / 1000);
+  } catch (err) {
+    console.warn('تعذّر تشغيل الصوت:', err);
+  }
+}
+
+function playAlertSound(state) {
+  if (state === 'ok') {
+    beep(880, 150, 0, 0.12); // نغمة قصيرة هادئة
+  } else if (state === 'scrap' || state === 'pending_defect') {
+    // نغمة تحذير مستمرة: 3 صفارات متتالية
+    beep(440, 200, 0, 0.2);
+    beep(440, 200, 300, 0.2);
+    beep(440, 200, 600, 0.2);
+  } else {
+    // ng / undefined: صفارتين
+    beep(523, 180, 0, 0.18);
+    beep(523, 180, 250, 0.18);
+  }
+}
+
+// =========================================================
 // فحص حالة العيوب المسجلة على السيريال ده (منفصل عن نتيجة شروط المقارنة)
 // بيرجع: 'scrap' لو فيه عيب اتقرر سكراب، 'pending' لو فيه عيب لسه معلق
 // (لم يُتخذ قرار)، أو null لو مفيش عيوب أو كلها اتاخد فيها قرار (إصلاح/موافقة بعلم/تغيير...)
@@ -403,8 +483,6 @@ async function checkDefectStatus(serial) {
       .from('defects')
       .select('status, action_taken')
       .eq('serial_number', serial);
-
-    console.log('[فحص حالة العيب]', JSON.stringify({ scanned: serial, foundRows: (data || []).length, data, error }));
 
     if (error || !data || data.length === 0) return null;
 
@@ -449,13 +527,18 @@ document.getElementById('closeScannerBtn').addEventListener('click', closeScanne
 // أنهي كود من دول (كامل أو بعد الاستخراج) بيحقق الشرط - من غير ما
 // الفني يحدد هو نفسه "ده سيريال" أو "ده QR"
 // =========================================================
+let comparisonInProgress = false;
 async function runComparison() {
+  if (comparisonInProgress) return;
   if (!currentStation) { resetScanBuffer(); return; }
+  if (scanBuffer.length === 0) return;
+  comparisonInProgress = true;
   const stationId = currentStation.id;
   const codes = [...scanBuffer];
 
   if (currentConditions.length === 0) {
     alert('⚠️ لا توجد شروط مضافة لهذه المحطة');
+    comparisonInProgress = false;
     resetScanBuffer();
     return;
   }
@@ -565,6 +648,7 @@ async function runComparison() {
     document.getElementById('unifiedScanInput').disabled = false;
     scanBuffer = [];
     renderScanProgress();
+    comparisonInProgress = false;
   }
 }
 
@@ -586,6 +670,7 @@ function showResult(result, conditionResults, codes, defectFlag) {
   else if (result === 'ok' && defectFlag === 'pending') displayState = 'pending_defect';
 
   overlay.className = 'result-overlay show ' + displayState;
+  playAlertSound(displayState);
 
   if (displayState === 'scrap') {
     icon.textContent = '💀';
