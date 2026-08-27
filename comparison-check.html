@@ -371,9 +371,7 @@ async function handleScan(rawValue) {
 
   const expected = currentStation.scansPerUnit || 1;
   if (scanBuffer.length >= expected) {
-    // مهلة قصيرة (نص ثانية) قبل تنفيذ الفحص فعليًا - فرصة أخيرة لو محتاج تلغي أو تضيف كود كمان
-    document.getElementById('unifiedScanInput').focus();
-    setTimeout(() => { if (scanBuffer.length >= expected) runComparison(); }, 400);
+    runComparison();
   } else {
     document.getElementById('unifiedScanInput').focus();
   }
@@ -701,7 +699,11 @@ async function runComparison() {
       });
     }
 
-    // Save log (بنحتفظ بالأكواد الخام كمان تحت مفتاح _raw عشان المراجعة لاحقًا)
+    // Show result فورًا (الأولوية: سكراب > NG > غير موجود > معلق > OK) - من غير ما ننتظر حفظ السجل
+    showResult(overallResult, conditionResults, codes, defectFlag);
+    updateStats(overallResult);
+
+    // حفظ السجل وتحديث القائمة في الخلفية (من غير ما توقف عرض النتيجة على الشاشة)
     const logPayload = {
       station_id: stationId,
       station_name: currentStation.name,
@@ -714,22 +716,10 @@ async function runComparison() {
       performed_by_email: currentUser.email
     };
 
-    const { error: logError } = await sbClient
-      .from('comparison_logs')
-      .insert([logPayload]);
-
-    if (logError) {
-      console.warn('فشل حفظ السجل:', logError);
-    }
-
-    // Show result (النتيجة النهائية بتاخد بالها من حالة العيب كمان، أولوية: سكراب > NG > غير موجود > معلق > OK)
-    showResult(overallResult, conditionResults, codes, defectFlag);
-
-    // Update stats
-    updateStats(overallResult);
-
-    // Refresh logs
-    loadRecentLogs();
+    sbClient.from('comparison_logs').insert([logPayload]).then(({ error: logError }) => {
+      if (logError) console.warn('فشل حفظ السجل:', logError);
+      loadRecentLogs();
+    });
 
   } catch (err) {
     console.error('خطأ في الفحص:', err);
