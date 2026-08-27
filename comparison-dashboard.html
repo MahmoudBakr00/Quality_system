@@ -558,10 +558,11 @@ async function loadStationsList() {
         <button class="small-btn danger" data-station-id="${s.id}" onclick="deleteComparisonStation('${s.id}')">🗑 حذف المحطة</button>
       </div>
 
-      <div style="display:flex; align-items:center; gap:8px; margin-top:8px; font-size:12px; color:#94a3b8;">
+      <div style="display:flex; align-items:center; gap:8px; margin-top:8px; font-size:12px; color:#94a3b8; flex-wrap:wrap;">
         <label style="margin:0;">📷 عدد الأكواد المطلوب سكانها لكل وحدة على الخط:</label>
-        <input type="number" min="1" max="5" value="${s.scans_per_unit || 1}" style="width:60px; padding:6px;" id="scansPerUnit-${s.id}" />
+        <input type="number" min="1" max="10" value="${s.scans_per_unit || 1}" style="width:60px; padding:6px;" id="scansPerUnit-${s.id}" />
         <button class="small-btn" style="padding:5px 10px; font-size:11px;" onclick="saveScansPerUnit('${s.id}')">💾</button>
+        <span style="font-size:10px; color:#64748b;">(بيتحدث تلقائي = عدد الشروط عند أي إضافة/حذف شرط، وتقدر تعدّله يدوي بعد كده)</span>
       </div>
 
       <label>👥 المستخدمين المسموح لهم بالمحطة دي:</label>
@@ -656,6 +657,7 @@ async function addConditionRow(stationId) {
     station_id: stationId, order_index: nextOrder, name: 'شرط جديد', comparison_type: 'database'
   }]);
   if (error) { alert('❌ ' + error.message); return; }
+  await syncScansPerUnit(stationId);
   loadStationsList();
 }
 
@@ -687,17 +689,32 @@ async function saveConditionRow(conditionId) {
 
 async function deleteConditionRow(conditionId) {
   if (!confirm('متأكد من حذف الشرط ده؟')) return;
+  const { data: cond } = await sbClient.from('comparison_conditions').select('station_id').eq('id', conditionId).single();
   await sbClient.from('comparison_conditions').delete().eq('id', conditionId);
+  if (cond) await syncScansPerUnit(cond.station_id);
   loadStationsList();
 }
 
 async function saveScansPerUnit(stationId) {
   const val = parseInt(document.getElementById(`scansPerUnit-${stationId}`).value, 10);
-  if (!val || val < 1 || val > 5) { alert('⚠️ اكتب رقم من 1 إلى 5'); return; }
+  if (!val || val < 1 || val > 10) { alert('⚠️ اكتب رقم من 1 إلى 10'); return; }
   const { error } = await sbClient.from('comparison_stations').update({ scans_per_unit: val }).eq('id', stationId);
   if (error) { alert('❌ ' + error.message); return; }
-  alert('✅ تم الحفظ');
+  alert('✅ تم الحفظ (تعديل يدوي - لو ضفت أو حذفت شرط بعد كده هيرجع يتحسب تلقائي من عدد الشروط)');
   loadStationsForFilter();
+}
+
+// بيتنادى تلقائيًا كل ما شرط يتضاف أو يتحذف - بيحدث عدد الأكواد المطلوب سكانها
+// ليطابق عدد الشروط الحالي في المحطة (يقدر المستخدم يعدّله يدويًا بعد كده لو محتاج استثناء)
+async function syncScansPerUnit(stationId) {
+  try {
+    const { count } = await sbClient.from('comparison_conditions')
+      .select('id', { count: 'exact', head: true }).eq('station_id', stationId);
+    const n = Math.max(1, Math.min(10, count || 1));
+    await sbClient.from('comparison_stations').update({ scans_per_unit: n }).eq('id', stationId);
+  } catch (err) {
+    console.warn('فشل تحديث عدد الأكواد التلقائي:', err);
+  }
 }
 
 async function deleteComparisonStation(stationId) {
@@ -855,6 +872,7 @@ async function excelSetupConfirm(stationId) {
     const { error: refErr } = await sbClient.from('comparison_reference_data').insert(rowsToInsert);
     if (refErr) throw refErr;
 
+    await syncScansPerUnit(stationId);
     alert(`✅ تم إنشاء ${insertedConditions.length} شرط وإضافة ${rowsToInsert.length} صف بنجاح — المحطة جاهزة الآن`);
     delete excelSetupState[stationId];
     loadStationsList();
@@ -992,6 +1010,7 @@ async function finishScanWizard(stationId) {
       .insert([{ station_id: stationId, expected_values: expectedValues }]);
     if (refErr) throw refErr;
 
+    await syncScansPerUnit(stationId);
     alert('✅ تم إعداد المحطة بنجاح، وبتسحب داتا طبيعي دلوقتي');
     delete scanWizardState[stationId];
     loadStationsList();
