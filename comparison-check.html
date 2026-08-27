@@ -162,11 +162,13 @@ select:focus, input:focus { outline: 2px solid #3b82f6; }
     <select id="stationSelect" required>
       <option value="">⏳ جاري تحميل المحطات...</option>
     </select>
+    <div id="refDataPreloadLabel" style="color:#64748b; font-size:11px; margin: -12px 0 14px;"></div>
 
     <!-- عرض الشروط المفعلة -->
     <div class="conditions-preview" id="conditionsPreview">
       <h4>📋 الشروط المفعلة:</h4>
       <div id="conditionsChips"></div>
+      <div id="stationRefCountLabel" style="color:#93c5fd; font-size:11px; margin-top:8px;"></div>
     </div>
 
     <label>📷 سكان</label>
@@ -280,10 +282,38 @@ async function loadStations() {
       o.textContent = s.name;
       select.appendChild(o);
     });
+
+    // نحمّل كل القيم المرجعية لكل المحطات مرة واحدة من أول فتح الصفحة،
+    // عشان بعد كده أي سكان يبقى فوري (من غير أي انتظار لتحميل القاعدة المرجعية)
+    preloadAllReferenceData(data);
   } catch (err) {
     console.error('فشل تحميل المحطات:', err);
     select.innerHTML = '<option value="">❌ فشل التحميل</option>';
   }
+}
+
+// =========================================================
+// تحميل مسبق لكل القيم المرجعية لكل المحطات دفعة واحدة عند فتح الصفحة
+// =========================================================
+async function preloadAllReferenceData(stations) {
+  const label = document.getElementById('refDataPreloadLabel');
+  if (label) label.textContent = '⏳ جاري تحميل القيم المرجعية لكل المحطات...';
+
+  await Promise.all(stations.map(async (s) => {
+    try {
+      const { data } = await sbClient.from('comparison_reference_data').select('*').eq('station_id', s.id);
+      refRowsCacheMap[s.id] = data || [];
+    } catch (err) {
+      console.warn('فشل تحميل القيم المرجعية لمحطة ' + s.name, err);
+      refRowsCacheMap[s.id] = [];
+    }
+  }));
+
+  if (label) {
+    const total = Object.values(refRowsCacheMap).reduce((sum, rows) => sum + rows.length, 0);
+    label.textContent = `📊 تم تحميل ${total} قيمة مرجعية إجمالاً (${stations.length} محطة) — جاهز للسكان الفوري`;
+  }
+  updateStationRefCountLabel();
 }
 
 // =========================================================
@@ -408,6 +438,7 @@ document.getElementById('stationSelect').addEventListener('change', async (e) =>
     `).join('');
 
     preview.style.display = 'block';
+    updateStationRefCountLabel();
 
   } catch (err) {
     console.error('فشل تحميل الشروط:', err);
@@ -415,6 +446,15 @@ document.getElementById('stationSelect').addEventListener('change', async (e) =>
     preview.style.display = 'block';
   }
 });
+
+// بيوري عدد القيم المرجعية المحملة للمحطة الحالية (بعد التحميل المسبق)
+function updateStationRefCountLabel() {
+  const label = document.getElementById('stationRefCountLabel');
+  if (!label) return;
+  if (!currentStation) { label.textContent = ''; return; }
+  const rows = refRowsCacheMap[currentStation.id];
+  label.textContent = rows ? `📊 عدد القيم المرجعية المحملة لهذه المحطة: ${rows.length}` : '⏳ جاري تحميل القيم المرجعية...';
+}
 
 // =========================================================
 // Extract helper
@@ -477,18 +517,24 @@ function playAlertSound(state) {
 // بيرجع: 'scrap' لو فيه عيب اتقرر سكراب، 'pending' لو فيه عيب لسه معلق
 // (لم يُتخذ قرار)، أو null لو مفيش عيوب أو كلها اتاخد فيها قرار (إصلاح/موافقة بعلم/تغيير...)
 // =========================================================
-async function checkDefectStatus(serial) {
+// فحص واحد لكل الأكواد المسكونة مرة واحدة (بدل طلب منفصل لكل كود) - بيرجع
+// Map من السيريال لحالته (scrap/pending) لتسريع الاستجابة بعد كل سكان
+async function checkDefectStatusBatch(codes) {
   try {
     const { data, error } = await sbClient
       .from('defects')
-      .select('status, action_taken')
-      .eq('serial_number', serial);
+      .select('status, action_taken, serial_number')
+      .in('serial_number', codes);
 
-    if (error || !data || data.length === 0) return null;
+    if (error || !data) return null;
 
-    if (data.some(d => d.status === 'rejected' && d.action_taken === 'scrap')) return 'scrap';
-    if (data.some(d => d.status === 'pending')) return 'pending';
-    return null;
+    let flag = null;
+    for (const code of codes) {
+      const rows = data.filter(d => d.serial_number === code);
+      if (rows.some(d => d.status === 'rejected' && d.action_taken === 'scrap')) return 'scrap';
+      if (rows.some(d => d.status === 'pending')) flag = 'pending';
+    }
+    return flag;
   } catch (err) {
     console.warn('فشل فحص حالة العيوب:', err);
     return null;
@@ -527,6 +573,21 @@ document.getElementById('closeScannerBtn').addEventListener('click', closeScanne
 // أنهي كود من دول (كامل أو بعد الاستخراج) بيحقق الشرط - من غير ما
 // الفني يحدد هو نفسه "ده سيريال" أو "ده QR"
 // =========================================================
+// كاش القاعدة المرجعية لكل المحطات - بيتحمل مسبقًا لكل المحطات مرة واحدة
+// وقت فتح الصفحة (preloadAllReferenceData)، وبيتجدد لو صف جديد اتسجل
+let refRowsCacheMap = {}; // stationId -> rows[]
+async function getCachedRefRows(stationId) {
+  if (refRowsCacheMap[stationId]) return refRowsCacheMap[stationId];
+  const { data } = await sbClient.from('comparison_reference_data').select('*').eq('station_id', stationId);
+  refRowsCacheMap[stationId] = data || [];
+  return refRowsCacheMap[stationId];
+}
+async function invalidateRefRowsCache(stationId) {
+  delete refRowsCacheMap[stationId];
+  await getCachedRefRows(stationId);
+  updateStationRefCountLabel();
+}
+
 let comparisonInProgress = false;
 async function runComparison() {
   if (comparisonInProgress) return;
@@ -546,10 +607,14 @@ async function runComparison() {
   document.getElementById('unifiedScanInput').disabled = true;
 
   try {
-    const { data: allRefRows } = await sbClient
-      .from('comparison_reference_data')
-      .select('*')
-      .eq('station_id', stationId);
+    // القاعدة المرجعية بتتحمل مرة واحدة بس لكل محطة وتتخزن مؤقتًا، بدل ما
+    // تتجاب من جديد كل سكان (بيسرّع الاستجابة بشكل كبير خصوصًا لو فيها صفوف كتير)
+    // وبنشغّلها بالتوازي مع فحص حالة العيوب بدل التتابع
+    const [refResult, defectFlag] = await Promise.all([
+      getCachedRefRows(stationId),
+      checkDefectStatusBatch(codes)
+    ]);
+    const allRefRows = refResult;
 
     const conditionResults = [];
     const scannedValues = {};
@@ -634,14 +699,6 @@ async function runComparison() {
         match: match,
         detail: detail
       });
-    }
-
-    // فحص حالة العيوب: بنجرب كل كود اتسكان (مش لازم نعرف مسبقًا أنهي كود هو السيريال)
-    let defectFlag = null;
-    for (const code of codes) {
-      const flag = await checkDefectStatus(code);
-      if (flag === 'scrap') { defectFlag = 'scrap'; break; }
-      if (flag === 'pending') defectFlag = 'pending';
     }
 
     // Save log (بنحتفظ بالأكواد الخام كمان تحت مفتاح _raw عشان المراجعة لاحقًا)
@@ -797,6 +854,7 @@ document.getElementById('registerMissingBtn').addEventListener('click', async ()
   btn.textContent = '➕ سجّل القيمة دي كموديل صحيح جديد';
 
   if (error) { alert('❌ فشل التسجيل: ' + error.message); return; }
+  await invalidateRefRowsCache(currentStation.id);
   alert('✅ تم تسجيل القيمة كموديل صحيح جديد — هتتقبل من دلوقتي');
   wrap.style.display = 'none';
 });
