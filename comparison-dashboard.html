@@ -77,6 +77,12 @@ td { padding: 8px; text-align: center; border-bottom: 1px solid #334155; }
 .scanner-close { width: 100%; margin-top: 14px; padding: 10px; background: #64748b; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
 .register-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
 .register-row label { min-width: 140px; margin: 0; font-size: 12px; }
+.ref-data-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.ref-data-table th { background: #0f172a; color: #93c5fd; padding: 6px 8px; text-align: right; position: sticky; top: 0; }
+.ref-data-table td { padding: 6px 8px; border-bottom: 1px solid #334155; font-family: monospace; direction: ltr; text-align: right; }
+.ref-data-table tr:hover td { background: #1e2b40; }
+.ref-data-scroll { max-height: 320px; overflow-y: auto; border: 1px solid #334155; border-radius: 8px; }
+.ref-data-search { width: 100%; padding: 8px; margin-bottom: 8px; border: none; border-radius: 6px; background: #0f172a; color: #f1f5f9; }
 .register-row input { flex: 1; }
 </style>
 </head>
@@ -601,7 +607,11 @@ async function loadStationsList() {
         <button class="small-btn green" onclick="openRegisterValue('${s.id}')">📷 تسجيل موديل جديد بالسكان</button>
       </div>
       <div style="color:#64748b; font-size:11px; margin-top:6px;">الأعمدة بالترتيب: عمود لكل شرط يستخدم "مقارنة مع قاعدة البيانات" (بنفس ترتيب الشروط)</div>
-      <div id="refCount-${s.id}" style="color:#93c5fd; font-size:12px; margin-top:6px;"></div>
+      <div style="display:flex; align-items:center; gap:10px; margin-top:6px;">
+        <div id="refCount-${s.id}" style="color:#93c5fd; font-size:12px;"></div>
+        <button class="small-btn" style="padding:5px 10px; font-size:11px;" onclick="toggleReferenceDataView('${s.id}')" id="viewRefDataBtn-${s.id}">👁 عرض القيم المسجلة</button>
+      </div>
+      <div id="refDataView-${s.id}" style="display:none; margin-top:10px;"></div>
       <div id="registerArea-${s.id}"></div>
       `}
     </div>
@@ -1067,6 +1077,98 @@ async function saveRegisteredValue(stationId) {
   alert('✅ تم تسجيل القيمة الجديدة بنجاح');
   document.getElementById(`registerArea-${stationId}`).innerHTML = '';
   loadStationsList();
+}
+
+// =========================================================
+// عرض/إخفاء كل القيم (الموديلات) المسجلة فعليًا لمحطة معينة
+// =========================================================
+const refDataCache = {}; // stationId -> {conditions, rows}
+
+async function toggleReferenceDataView(stationId) {
+  const view = document.getElementById(`refDataView-${stationId}`);
+  const btn = document.getElementById(`viewRefDataBtn-${stationId}`);
+  const isOpen = view.style.display === 'block';
+
+  if (isOpen) {
+    view.style.display = 'none';
+    btn.textContent = '👁 عرض القيم المسجلة';
+    return;
+  }
+
+  view.style.display = 'block';
+  btn.textContent = '🙈 إخفاء القيم المسجلة';
+  view.innerHTML = '<div style="color:#64748b; font-size:12px; padding:10px;">⏳ جاري التحميل...</div>';
+
+  try {
+    const { data: conditions, error: cErr } = await sbClient.from('comparison_conditions')
+      .select('*').eq('station_id', stationId).eq('comparison_type', 'database').order('order_index');
+    if (cErr) throw cErr;
+
+    const { data: rows, error: rErr } = await sbClient.from('comparison_reference_data')
+      .select('*').eq('station_id', stationId).order('created_at', { ascending: false });
+    if (rErr) throw rErr;
+
+    refDataCache[stationId] = { conditions: conditions || [], rows: rows || [] };
+    renderReferenceDataTable(stationId, '');
+  } catch (err) {
+    view.innerHTML = `<div style="color:#f87171; font-size:12px;">❌ حصل خطأ: ${err.message}</div>`;
+  }
+}
+
+function renderReferenceDataTable(stationId, searchTerm) {
+  const view = document.getElementById(`refDataView-${stationId}`);
+  const cache = refDataCache[stationId];
+  if (!cache) return;
+  const { conditions, rows } = cache;
+
+  if (conditions.length === 0) {
+    view.innerHTML = '<div style="color:#fbbf24; font-size:12px; padding:10px;">⚠️ المحطة دي مفيهاش شروط من نوع "مقارنة/تحقق"</div>';
+    return;
+  }
+
+  const term = (searchTerm || '').trim().toLowerCase();
+  const filteredRows = term
+    ? rows.filter(r => Object.values(r.expected_values || {}).some(v => String(v).toLowerCase().includes(term)))
+    : rows;
+
+  if (rows.length === 0) {
+    view.innerHTML = '<div style="color:#64748b; font-size:12px; padding:10px;">📭 لا توجد أي قيم مسجلة لهذه المحطة بعد</div>';
+    return;
+  }
+
+  const tableRows = filteredRows.map(r => `
+    <tr>
+      ${conditions.map(c => `<td>${(r.expected_values && r.expected_values[c.order_index]) || '-'}</td>`).join('')}
+      <td><button class="small-btn danger" style="padding:3px 8px; font-size:10px;" onclick="deleteReferenceDataRow('${stationId}', '${r.id}')">🗑</button></td>
+    </tr>
+  `).join('');
+
+  view.innerHTML = `
+    <input type="text" class="ref-data-search" placeholder="🔍 دور في القيم المسجلة..." oninput="renderReferenceDataTable('${stationId}', this.value)" value="${searchTerm ? searchTerm.replace(/"/g, '&quot;') : ''}" />
+    <div style="color:#64748b; font-size:11px; margin-bottom:6px;">عدد النتائج: ${filteredRows.length} من ${rows.length}</div>
+    <div class="ref-data-scroll">
+      <table class="ref-data-table">
+        <thead>
+          <tr>
+            ${conditions.map(c => `<th>${c.name}</th>`).join('')}
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>${tableRows || `<tr><td colspan="${conditions.length + 1}" style="text-align:center; color:#64748b;">لا توجد نتائج مطابقة للبحث</td></tr>`}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function deleteReferenceDataRow(stationId, rowId) {
+  if (!confirm('متأكد إنك عايز تحذف القيمة دي من القاعدة المرجعية؟')) return;
+  const { error } = await sbClient.from('comparison_reference_data').delete().eq('id', rowId);
+  if (error) { alert('❌ فشل الحذف: ' + error.message); return; }
+  refDataCache[stationId].rows = refDataCache[stationId].rows.filter(r => r.id !== rowId);
+  renderReferenceDataTable(stationId, document.querySelector(`#refDataView-${stationId} .ref-data-search`)?.value || '');
+  loadStationsForFilter();
+  const el = document.getElementById(`refCount-${stationId}`);
+  if (el) el.textContent = `عدد الصفوف المخزّنة حاليًا: ${refDataCache[stationId].rows.length}`;
 }
 </script>
 </body>
