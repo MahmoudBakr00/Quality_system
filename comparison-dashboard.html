@@ -734,6 +734,17 @@ async function deleteComparisonStation(stationId) {
   loadStationsForFilter();
 }
 
+// دالة موحّدة: تطبق استخراج الشرط (لو محدد) على أي قيمة قبل تخزينها كمرجع،
+// عشان القيمة المخزنة تفضل متطابقة مع اللي هيتحسب فعليًا وقت السكان على الخط
+function applyConditionExtraction(rawValue, condition) {
+  const val = String(rawValue).trim();
+  if (!val) return '';
+  if (condition.extract_start && condition.extract_end) {
+    return extractPreview(val, condition.extract_start, condition.extract_end) || val;
+  }
+  return val;
+}
+
 async function uploadReferenceData(stationId) {
   const fileInput = document.getElementById(`refFile-${stationId}`);
   const file = fileInput.files[0];
@@ -760,7 +771,7 @@ async function uploadReferenceData(stationId) {
         conditions.forEach((c, idx) => {
           const cellValue = r[idx];
           if (cellValue !== undefined && cellValue !== null) {
-            expectedValues[c.order_index] = String(cellValue).trim();
+            expectedValues[c.order_index] = applyConditionExtraction(cellValue, c);
           }
         });
         return { station_id: stationId, expected_values: expectedValues };
@@ -774,7 +785,7 @@ async function uploadReferenceData(stationId) {
     const { error } = await sbClient.from('comparison_reference_data').insert(rowsToInsert);
     if (error) throw error;
 
-    alert(`✅ تمت إضافة ${rowsToInsert.length} صف بنجاح`);
+    alert(`✅ تمت إضافة ${rowsToInsert.length} صف بنجاح (تم تطبيق مدى الاستخراج المحدد لكل شرط تلقائيًا)`);
     loadStationsList();
   } catch (err) {
     alert('❌ فشل رفع الملف: ' + err.message);
@@ -873,7 +884,7 @@ async function excelSetupConfirm(stationId) {
       insertedConditions.forEach((c, idx) => {
         const cellValue = r[idx];
         if (cellValue !== undefined && cellValue !== null) {
-          expectedValues[c.order_index] = String(cellValue).trim();
+          expectedValues[c.order_index] = applyConditionExtraction(cellValue, c);
         }
       });
       return { station_id: stationId, expected_values: expectedValues };
@@ -1044,13 +1055,14 @@ async function openRegisterValue(stationId) {
 
   document.getElementById(`registerArea-${stationId}`).innerHTML = `
     <div class="wizard-panel">
-      <h4>📷 تسجيل موديل/قيمة جديدة — اسكان أو اكتب قيمة كل شرط</h4>
+      <h4>📷 تسجيل موديل/قيمة جديدة — اسكان أو اكتب قيمة كل شرط (سواء كاملة أو الجزء المطلوب، هيتم استخراج الجزء الصح تلقائيًا)</h4>
       ${conditions.map(c => `
         <div class="register-row">
-          <label>${c.order_index}. ${c.name}</label>
-          <input type="text" class="reg-value" data-order-index="${c.order_index}" placeholder="القيمة" />
-          <button type="button" class="wizard-scan-btn" onclick="openDashScanner(v => { document.querySelector('#registerArea-${stationId} .reg-value[data-order-index=\\'${c.order_index}\\']').value = v; })">📷</button>
+          <label>${c.order_index}. ${c.name}${c.extract_start ? ` (${c.extract_start}-${c.extract_end})` : ''}</label>
+          <input type="text" class="reg-value" data-order-index="${c.order_index}" data-extract-start="${c.extract_start || ''}" data-extract-end="${c.extract_end || ''}" placeholder="القيمة" oninput="updateRegisterPreview('${stationId}', this)" />
+          <button type="button" class="wizard-scan-btn" onclick="openDashScanner(v => { const inp = document.querySelector('#registerArea-${stationId} .reg-value[data-order-index=\\'${c.order_index}\\']'); inp.value = v; updateRegisterPreview('${stationId}', inp); })">📷</button>
         </div>
+        <div class="wizard-preview" id="regPreview-${stationId}-${c.order_index}"></div>
       `).join('')}
       <div class="wizard-actions">
         <button class="small-btn green" onclick="saveRegisteredValue('${stationId}')">💾 حفظ كقيمة صحيحة جديدة</button>
@@ -1060,12 +1072,27 @@ async function openRegisterValue(stationId) {
   `;
 }
 
+function updateRegisterPreview(stationId, inputEl) {
+  const orderIndex = inputEl.dataset.orderIndex;
+  const start = parseInt(inputEl.dataset.extractStart, 10);
+  const end = parseInt(inputEl.dataset.extractEnd, 10);
+  const preview = document.getElementById(`regPreview-${stationId}-${orderIndex}`);
+  if (!preview) return;
+  const raw = inputEl.value.trim();
+  if (!raw) { preview.textContent = ''; return; }
+  const stored = (start && end) ? (extractPreview(raw, start, end) || raw) : raw;
+  preview.textContent = (start && end) ? `القيمة اللي هتتسجل فعليًا: "${stored}"` : '';
+}
+
 async function saveRegisteredValue(stationId) {
   const inputs = document.querySelectorAll(`#registerArea-${stationId} .reg-value`);
   const expectedValues = {};
   inputs.forEach(inp => {
     const val = inp.value.trim();
-    if (val) expectedValues[inp.dataset.orderIndex] = val;
+    if (!val) return;
+    const start = parseInt(inp.dataset.extractStart, 10);
+    const end = parseInt(inp.dataset.extractEnd, 10);
+    expectedValues[inp.dataset.orderIndex] = (start && end) ? (extractPreview(val, start, end) || val) : val;
   });
 
   if (Object.keys(expectedValues).length === 0) { alert('⚠️ اكتب أو اسكان قيمة واحدة على الأقل'); return; }
@@ -1138,14 +1165,24 @@ function renderReferenceDataTable(stationId, searchTerm) {
 
   const tableRows = filteredRows.map(r => `
     <tr>
-      ${conditions.map(c => `<td>${(r.expected_values && r.expected_values[c.order_index]) || '-'}</td>`).join('')}
+      ${conditions.map(c => {
+        const v = (r.expected_values && r.expected_values[c.order_index]) || '-';
+        const expectedLen = c.extract_start && c.extract_end ? (c.extract_end - c.extract_start + 1) : null;
+        const looksWrong = expectedLen && v !== '-' && String(v).length !== expectedLen;
+        return `<td style="${looksWrong ? 'color:#fbbf24;' : ''}" title="${looksWrong ? 'الطول مش مطابق لمدى الاستخراج المحدد للشرط ده - ممكن تكون قيمة كاملة مش مقصوصة' : ''}">${v}${looksWrong ? ' ⚠️' : ''}</td>`;
+      }).join('')}
       <td><button class="small-btn danger" style="padding:3px 8px; font-size:10px;" onclick="deleteReferenceDataRow('${stationId}', '${r.id}')">🗑</button></td>
     </tr>
   `).join('');
 
+  const hasExtractionConditions = conditions.some(c => c.extract_start && c.extract_end);
+
   view.innerHTML = `
     <input type="text" class="ref-data-search" placeholder="🔍 دور في القيم المسجلة..." oninput="renderReferenceDataTable('${stationId}', this.value)" value="${searchTerm ? searchTerm.replace(/"/g, '&quot;') : ''}" />
-    <div style="color:#64748b; font-size:11px; margin-bottom:6px;">عدد النتائج: ${filteredRows.length} من ${rows.length}</div>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; flex-wrap:wrap; gap:8px;">
+      <div style="color:#64748b; font-size:11px;">عدد النتائج: ${filteredRows.length} من ${rows.length} ${hasExtractionConditions ? '(⚠️ = القيمة طولها مش مطابق لمدى الاستخراج المحدد، يحتمل تكون قيمة كاملة مش مقصوصة)' : ''}</div>
+      ${hasExtractionConditions ? `<button class="small-btn" style="padding:5px 10px; font-size:11px;" onclick="fixReferenceDataExtraction('${stationId}')">🔧 إصلاح القيم غير المطابقة تلقائيًا</button>` : ''}
+    </div>
     <div class="ref-data-scroll">
       <table class="ref-data-table">
         <thead>
@@ -1169,6 +1206,48 @@ async function deleteReferenceDataRow(stationId, rowId) {
   loadStationsForFilter();
   const el = document.getElementById(`refCount-${stationId}`);
   if (el) el.textContent = `عدد الصفوف المخزّنة حاليًا: ${refDataCache[stationId].rows.length}`;
+}
+
+// إصلاح تلقائي: بيعيد تطبيق مدى الاستخراج المحدد لكل شرط على كل القيم المخزنة
+// (لأي قيمة اتسجلت قبل كده كاملة من غير ما تتقص حسب مدى الاستخراج)
+async function fixReferenceDataExtraction(stationId) {
+  const cache = refDataCache[stationId];
+  if (!cache) return;
+  const { conditions, rows } = cache;
+
+  const updates = [];
+  rows.forEach(r => {
+    let changed = false;
+    const newValues = { ...(r.expected_values || {}) };
+    conditions.forEach(c => {
+      if (!c.extract_start || !c.extract_end) return;
+      const current = newValues[c.order_index];
+      if (current === undefined || current === null) return;
+      const fixed = applyConditionExtraction(current, c);
+      if (fixed && fixed !== String(current)) {
+        newValues[c.order_index] = fixed;
+        changed = true;
+      }
+    });
+    if (changed) updates.push({ id: r.id, expected_values: newValues });
+  });
+
+  if (updates.length === 0) { alert('✅ كل القيم مطابقة لمدى الاستخراج المحدد بالفعل، مفيش حاجة محتاجة إصلاح'); return; }
+
+  if (!confirm(`هيتم تصحيح ${updates.length} قيمة (تقصيرها حسب مدى الاستخراج المحدد لكل شرط). متابعة؟`)) return;
+
+  try {
+    for (const u of updates) {
+      const { error } = await sbClient.from('comparison_reference_data')
+        .update({ expected_values: u.expected_values }).eq('id', u.id);
+      if (error) throw error;
+    }
+    alert(`✅ تم تصحيح ${updates.length} قيمة بنجاح`);
+    await toggleReferenceDataView(stationId); // يقفل
+    await toggleReferenceDataView(stationId); // يفتح تاني ويحمل البيانات المحدثة
+  } catch (err) {
+    alert('❌ فشل الإصلاح: ' + err.message);
+  }
 }
 </script>
 </body>
