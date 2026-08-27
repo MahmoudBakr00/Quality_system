@@ -556,13 +556,40 @@ async function runComparison() {
     let overallResult = 'ok';
     let mismatchDetails = [];
 
+    // كل عنصر: {idx: رقم الكود في مصفوفة الأكواد, value: القيمة (مستخرجة أو كاملة)}
+    // claimedBy[idx] = رقم ترتيب الشرط اللي "أخد" الكود ده بنجاح (عشان شرط تاني ميستخدمهوش
+    // كقيمة عرض تلقائية لو هو فشل، ويوريك الكود الحقيقي المتبقي بدل ما يكرر نفس الكود المتاخد)
+    const claimedBy = new Array(codes.length).fill(null);
+
+    const buildAttempts = (condition) => codes.map((code, idx) => ({
+      idx,
+      value: condition.extract_start ? extractSubstring(code, condition.extract_start, condition.extract_end) : code
+    }));
+
+    const findDbMatch = (condition, attempts, onlyUnclaimed) => {
+      for (const a of attempts) {
+        if (!a.value) continue;
+        if (onlyUnclaimed && claimedBy[a.idx] !== null) continue;
+        const found = (allRefRows || []).find(r => String(r.expected_values?.[condition.order_index]) === String(a.value));
+        if (found) return { attempt: a, found };
+      }
+      return null;
+    };
+
+    // Pass 1: مطابقة الشروط اللي عندها قيمة حقيقية في القاعدة، بالأولوية للأكواد اللي لسه محدش
+    // أخدها (عشان نمنع كودين شروط مختلفين ياخدوا نفس الكود غلط لو فيه اختيار تاني متاح)
     for (const condition of currentConditions) {
-      const attempts = codes.map(code =>
-        condition.extract_start ? extractSubstring(code, condition.extract_start, condition.extract_end) : code
-      );
+      if (condition.comparison_type !== 'database') continue;
+      const attempts = buildAttempts(condition);
+      const result = findDbMatch(condition, attempts, true) || findDbMatch(condition, attempts, false);
+      if (result && claimedBy[result.attempt.idx] === null) claimedBy[result.attempt.idx] = condition.order_index;
+    }
+
+    for (const condition of currentConditions) {
+      const attempts = buildAttempts(condition);
 
       let match = false;
-      let matchedValue = attempts.find(a => a) || null;
+      let matchedValue = null;
       let expectedValue = null;
       let detail = '';
 
@@ -577,14 +604,20 @@ async function runComparison() {
             if (v2 && v1 === v2) { match = true; matchedValue = v1; expectedValue = v2; break outer; }
           }
         }
+        if (!match) matchedValue = (attempts.find(a => a.value && claimedBy[a.idx] === null) || attempts.find(a => a.value) || {}).value || null;
         detail = match ? 'مطابق' : 'لم يتم إيجاد تطابق بين الأكواد المسكونة';
         if (!match) { overallResult = 'ng'; mismatchDetails.push(`${condition.name}: عدم تطابق`); }
 
       } else if (condition.comparison_type === 'database') {
-        for (const val of attempts) {
-          if (!val) continue;
-          const found = (allRefRows || []).find(r => String(r.expected_values?.[condition.order_index]) === String(val));
-          if (found) { match = true; matchedValue = val; expectedValue = found.expected_values[condition.order_index]; break; }
+        const result = findDbMatch(condition, attempts, false);
+        if (result && claimedBy[result.attempt.idx] === condition.order_index) {
+          match = true;
+          matchedValue = result.attempt.value;
+          expectedValue = result.found.expected_values[condition.order_index];
+        } else {
+          // فشل: نفضّل نوري كود مش متاخد لشرط تاني بالفعل، عشان النتيجة تكون واضحة ومفيدة
+          const unclaimed = attempts.find(a => a.value && claimedBy[a.idx] === null);
+          matchedValue = (unclaimed || attempts.find(a => a.value) || {}).value || null;
         }
         detail = match ? 'موجود في قاعدة البيانات' : 'غير موجود في القاعدة المرجعية';
         if (!match) { overallResult = 'ng'; mismatchDetails.push(`${condition.name}: ${matchedValue || 'N/A'} غير موجود في DB`); }
