@@ -652,7 +652,7 @@ function renderConditionRow(c) {
         <option value="save" ${c.comparison_type === 'save' ? 'selected' : ''}>💾 حفظ (تسجيل كل قيمة تتسكان)</option>
       </select>
       <input type="number" class="cond-peer" value="${c.peer_condition_order || ''}" placeholder="رقم الشرط (لو مباشرة)" min="1" />
-      <label style="display:${c.comparison_type === 'save' ? 'flex' : 'none'}; align-items:center; gap:4px; font-size:11px; font-weight:normal; white-space:nowrap;" class="cond-duplicate-wrap">
+      <label style="display:${c.comparison_type !== 'peer' ? 'flex' : 'none'}; align-items:center; gap:4px; font-size:11px; font-weight:normal; white-space:nowrap;" class="cond-duplicate-wrap">
         <input type="checkbox" class="cond-duplicate" ${c.prevent_duplicate ? 'checked' : ''} /> 🚫 منع تكرار القيمة
       </label>
       <div style="display:flex; gap:4px;">
@@ -665,7 +665,7 @@ function renderConditionRow(c) {
 
 function toggleCondDuplicateCb(selectEl) {
   const wrap = selectEl.closest('.condition-row').querySelector('.cond-duplicate-wrap');
-  wrap.style.display = selectEl.value === 'save' ? 'flex' : 'none';
+  wrap.style.display = selectEl.value !== 'peer' ? 'flex' : 'none';
 }
 
 async function addConditionRow(stationId) {
@@ -700,7 +700,7 @@ async function saveConditionRow(conditionId) {
   const { error } = await sbClient.from('comparison_conditions').update({
     name, extract_start: extractStart, extract_end: extractEnd,
     comparison_type: type, peer_condition_order: type === 'peer' ? parseInt(peerOrder, 10) : null,
-    prevent_duplicate: type === 'save' ? preventDuplicate : false,
+    prevent_duplicate: type !== 'peer' ? preventDuplicate : false,
   }).eq('id', conditionId);
 
   if (error) { alert('❌ ' + error.message); return; }
@@ -940,7 +940,7 @@ function renderScanWizard(stationId) {
           items.map((it, idx) => `
             <span class="wizard-cond-chip">
               ${idx + 1}. ${it.name} ${it.extract_start ? `(${it.extract_start}-${it.extract_end})` : ''}
-              ${it.type === 'save' ? `💾${it.preventDuplicate ? ' 🚫منع تكرار' : ''}` : `= "${it.value}"`}
+              ${it.type === 'save' ? `💾${it.preventDuplicate ? ' 🚫منع تكرار' : ''}` : it.type === 'peer' ? `🔗← شرط #${it.peerOrder}` : `= "${it.value}"${it.preventDuplicate ? ' 🚫منع تكرار' : ''}`}
               <button onclick="removeWizardCondition('${stationId}', ${idx})">✕</button>
             </span>
           `).join('')}
@@ -953,6 +953,7 @@ function renderScanWizard(stationId) {
         <label><input type="radio" name="wzType-${stationId}" value="full" checked onchange="toggleWizardExtract('${stationId}')" /> 1. مقارنة مع قاعدة بيانات (القيمة كاملة)</label>
         <label><input type="radio" name="wzType-${stationId}" value="extract" onchange="toggleWizardExtract('${stationId}')" /> 2. استخراج (جزء من القيمة)</label>
         <label><input type="radio" name="wzType-${stationId}" value="save" onchange="toggleWizardExtract('${stationId}')" /> 3. 💾 حفظ (تسجيل كل قيمة تتسكان)</label>
+        <label><input type="radio" name="wzType-${stationId}" value="peer" onchange="toggleWizardExtract('${stationId}')" /> 4. 🔗 مقارنة بشرط تاني</label>
       </div>
 
       <div class="wizard-extract-row" id="wzExtractRow-${stationId}">
@@ -960,12 +961,16 @@ function renderScanWizard(stationId) {
         <input type="number" id="wzEnd-${stationId}" placeholder="إلى (رقم الحرف)" min="1" oninput="updateWizardPreview('${stationId}')" />
       </div>
 
+      <div id="wzPeerRow-${stationId}" style="display:none; margin-top:8px;">
+        <input type="number" id="wzPeerOrder-${stationId}" placeholder="رقم الشرط اللي عايز تقارن بيه (مثال: 1)" min="1" />
+      </div>
+
       <label style="display:none; align-items:center; gap:6px; font-weight:normal; margin-top:8px;" id="wzDuplicateWrap-${stationId}">
         <input type="checkbox" id="wzDuplicate-${stationId}" /> 🚫 منع تكرار القيمة (لو اتسكانت قبل كده، هيظهر خطأ "مكرر")
       </label>
 
       <label style="margin-top:10px;" id="wzValueLabel-${stationId}">القيمة المرجعية (اسكانها من الوحدة الفعلية أو اكتبها يدويًا)</label>
-      <div class="wizard-scan-row">
+      <div class="wizard-scan-row" id="wzValueRow-${stationId}">
         <input type="text" id="wzValue-${stationId}" placeholder="سكان أو كتابة يدوية" oninput="updateWizardPreview('${stationId}')" />
         <button type="button" class="wizard-scan-btn" onclick="openDashScanner(v => { document.getElementById('wzValue-${stationId}').value = v; updateWizardPreview('${stationId}'); })">📷 سكان</button>
       </div>
@@ -983,7 +988,10 @@ function renderScanWizard(stationId) {
 function toggleWizardExtract(stationId) {
   const type = document.querySelector(`input[name="wzType-${stationId}"]:checked`).value;
   document.getElementById(`wzExtractRow-${stationId}`).classList.toggle('show', type === 'extract');
-  document.getElementById(`wzDuplicateWrap-${stationId}`).style.display = type === 'save' ? 'flex' : 'none';
+  document.getElementById(`wzDuplicateWrap-${stationId}`).style.display = type !== 'peer' ? 'flex' : 'none';
+  document.getElementById(`wzPeerRow-${stationId}`).style.display = type === 'peer' ? 'block' : 'none';
+  document.getElementById(`wzValueRow-${stationId}`).style.display = type === 'peer' ? 'none' : 'flex';
+  document.getElementById(`wzValueLabel-${stationId}`).style.display = type === 'peer' ? 'none' : 'block';
   document.getElementById(`wzValueLabel-${stationId}`).textContent = type === 'save'
     ? 'قيمة أولى (اختياري - ممكن تسيبها فاضية وتبدأ التسجيل من أول سكان فعلي على الخط)'
     : 'القيمة المرجعية (اسكانها من الوحدة الفعلية أو اكتبها يدويًا)';
@@ -994,7 +1002,9 @@ function updateWizardPreview(stationId) {
   const type = document.querySelector(`input[name="wzType-${stationId}"]:checked`)?.value;
   const value = document.getElementById(`wzValue-${stationId}`).value.trim();
   const preview = document.getElementById(`wzPreview-${stationId}`);
-  if (type === 'extract') {
+  if (type === 'peer') {
+    preview.textContent = '';
+  } else if (type === 'extract') {
     const start = parseInt(document.getElementById(`wzStart-${stationId}`).value, 10);
     const end = parseInt(document.getElementById(`wzEnd-${stationId}`).value, 10);
     const extracted = extractPreview(value, start, end);
@@ -1010,9 +1020,18 @@ function addWizardCondition(stationId) {
   const name = document.getElementById(`wzName-${stationId}`).value.trim();
   const type = document.querySelector(`input[name="wzType-${stationId}"]:checked`).value;
   const rawValue = document.getElementById(`wzValue-${stationId}`).value.trim();
-  const preventDuplicate = type === 'save' ? document.getElementById(`wzDuplicate-${stationId}`).checked : false;
+  const preventDuplicate = type !== 'peer' ? document.getElementById(`wzDuplicate-${stationId}`).checked : false;
 
   if (!name) { alert('⚠️ اكتب اسم الشرط'); return; }
+
+  if (type === 'peer') {
+    const peerOrder = parseInt(document.getElementById(`wzPeerOrder-${stationId}`).value, 10);
+    if (!peerOrder) { alert('⚠️ اكتب رقم الشرط اللي عايز تقارن بيه'); return; }
+    scanWizardState[stationId].push({ name, type: 'peer', extract_start: null, extract_end: null, value: null, preventDuplicate: false, peerOrder });
+    renderScanWizard(stationId);
+    return;
+  }
+
   if (type !== 'save' && !rawValue) { alert('⚠️ اسكان أو اكتب القيمة المرجعية'); return; }
 
   let extractStart = null, extractEnd = null, value = rawValue || null;
@@ -1047,8 +1066,9 @@ async function finishScanWizard(stationId) {
     const conditionsToInsert = items.map((it, idx) => ({
       station_id: stationId, order_index: idx + 1, name: it.name,
       extract_start: it.extract_start, extract_end: it.extract_end,
-      comparison_type: it.type === 'save' ? 'save' : 'database',
-      prevent_duplicate: it.type === 'save' ? !!it.preventDuplicate : false,
+      comparison_type: it.type === 'save' ? 'save' : it.type === 'peer' ? 'peer' : 'database',
+      peer_condition_order: it.type === 'peer' ? it.peerOrder : null,
+      prevent_duplicate: it.type !== 'peer' ? !!it.preventDuplicate : false,
     }));
 
     const { data: insertedConditions, error: condErr } = await sbClient
