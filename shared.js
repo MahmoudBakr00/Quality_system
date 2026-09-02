@@ -205,12 +205,17 @@ function extractJobOrder(serial) {
 function startScanner(containerId, formats, onResult, onError) {
   const html5QrCode = new Html5Qrcode(containerId, { formatsToSupport: formats, verbose: false });
   let stopped = false;
+  // "handled" بتمنع onResult من الاستدعاء أكتر من مرة - الكاميرا بتفحص كذا فريم
+  // في الثانية (fps: 10) وممكن تلاقي نفس الكود كذا مرة قبل ما توقف فعليًا (لأن
+  // stop() بتاخد وقت وهي async)، وده كان بيسبب نتايج مكررة/ملزّقة في بعضها
+  let handled = false;
 
   html5QrCode.start(
     { facingMode: "environment" },
     { fps: 10, qrbox: { width: 280, height: 140 } },
     (decodedText) => {
-      if (!stopped) {
+      if (!stopped && !handled) {
+        handled = true;
         onResult(decodedText);
       }
     },
