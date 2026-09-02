@@ -52,6 +52,7 @@ select:focus, input:focus { outline: 2px solid #3b82f6; }
 .result-overlay.scrap { background: linear-gradient(135deg, #0f0f0f 0%, #3f0d0d 100%); }
 .result-overlay.pending_defect { background: linear-gradient(135deg, #581c87 0%, #a855f7 100%); }
 .result-overlay.duplicate { background: linear-gradient(135deg, #92400e 0%, #f59e0b 100%); }
+.result-overlay.not_verified { background: linear-gradient(135deg, #0e7490 0%, #06b6d4 100%); }
 .register-missing-btn { background: rgba(255,255,255,0.15); color: white; border: 1px solid rgba(255,255,255,0.4); padding: 10px 20px; border-radius: 50px; font-size: 13px; font-weight: bold; cursor: pointer; margin-top: 10px; }
 .register-missing-btn:hover { background: rgba(255,255,255,0.25); }
 @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
@@ -309,11 +310,13 @@ async function preloadAllReferenceData(stations) {
       refRowsCacheMap[s.id] = [];
     }
     try {
-      const { data } = await sbClient.from('comparison_duplicate_log').select('order_index, value').eq('station_id', s.id);
-      dupLogCacheMap[s.id] = new Set((data || []).map(r => r.order_index + '::' + r.value));
+      const { data } = await sbClient.from('comparison_duplicate_log').select('order_index, value, created_at').eq('station_id', s.id);
+      const map = new Map();
+      (data || []).forEach(r => map.set(r.order_index + '::' + r.value, r.created_at));
+      dupLogCacheMap[s.id] = map;
     } catch (err) {
       console.warn('فشل تحميل سجل منع التكرار لمحطة ' + s.name, err);
-      dupLogCacheMap[s.id] = new Set();
+      dupLogCacheMap[s.id] = new Map();
     }
   }));
 
@@ -324,17 +327,32 @@ async function preloadAllReferenceData(stations) {
   updateStationRefCountLabel();
 }
 
-// كاش سجل "منع التكرار" لكل محطة - مفتاح كل قيمة هو "رقم الشرط::القيمة"
-let dupLogCacheMap = {}; // stationId -> Set
+// كاش سجل "منع التكرار" لكل محطة - مفتاح كل قيمة هو "رقم الشرط::القيمة" (السيريال/الكود
+// الكامل اللي اتسكان فعليًا، مش الجزء المستخرج بس - عشان يصلح كمان لو حبيت تقارن شرط
+// تاني بالشرط ده لاحقًا)، والقيمة هي تاريخ ووقت أول مرة القيمة دي اتسجلت
+let dupLogCacheMap = {}; // stationId -> Map(key -> created_at ISO string)
 function isDuplicateInLog(stationId, orderIndex, value) {
-  const set = dupLogCacheMap[stationId];
-  return !!(set && set.has(orderIndex + '::' + value));
+  const map = dupLogCacheMap[stationId];
+  return map ? map.get(orderIndex + '::' + value) : undefined; // بيرجع تاريخ أول مرة، أو undefined لو مش مكرر
 }
 function registerDuplicateLog(stationId, orderIndex, value) {
-  if (!dupLogCacheMap[stationId]) dupLogCacheMap[stationId] = new Set();
-  dupLogCacheMap[stationId].add(orderIndex + '::' + value);
+  if (!dupLogCacheMap[stationId]) dupLogCacheMap[stationId] = new Map();
+  const nowIso = new Date().toISOString();
+  dupLogCacheMap[stationId].set(orderIndex + '::' + value, nowIso);
   sbClient.from('comparison_duplicate_log').insert([{ station_id: stationId, order_index: orderIndex, value: String(value) }])
     .then(({ error }) => { if (error && error.code !== '23505') console.warn('فشل تسجيل منع التكرار:', error); });
+}
+
+// هل القيمة دي (سيريال كامل) اتسجلت قبل كده في أي شرط في محطة معينة (بغض النظر عن رقم
+// الشرط) - مستخدمة في "تحقق من محطة سابقة" عشان نتأكد إن الوحدة دي مرّت فعلاً من محطة تانية
+function stationHasValueInLog(stationId, value) {
+  const map = dupLogCacheMap[stationId];
+  if (!map) return false;
+  const suffix = '::' + value;
+  for (const key of map.keys()) {
+    if (key.endsWith(suffix)) return true;
+  }
+  return false;
 }
 
 // =========================================================
@@ -529,6 +547,11 @@ function playAlertSound(state) {
     beep(700, 150, 0, 0.2);
     beep(350, 150, 200, 0.2);
     beep(700, 150, 400, 0.2);
+  } else if (state === 'not_verified') {
+    // نغمة مميزة "لم تُختبر": نغمة هابطة طويلة
+    beep(600, 150, 0, 0.2);
+    beep(500, 150, 180, 0.2);
+    beep(400, 250, 360, 0.2);
   } else {
     // ng / undefined: صفارتين
     beep(523, 180, 0, 0.18);
@@ -645,6 +668,7 @@ async function runComparison() {
     let overallResult = 'ok';
     let mismatchDetails = [];
     let hasDuplicate = false;
+    let hasNotVerified = false;
     const pendingSaveValues = {};
 
     // كل عنصر: {idx: رقم الكود في مصفوفة الأكواد, value: القيمة (مستخرجة أو كاملة)}
@@ -686,37 +710,69 @@ async function runComparison() {
 
       if (condition.comparison_type === 'peer') {
         const peerCondition = currentConditions.find(c => c.order_index === condition.peer_condition_order);
+        let matchedIdx = null;
         outer:
-        for (const code1 of codes) {
-          const v1 = condition.extract_start ? extractSubstring(code1, condition.extract_start, condition.extract_end) : code1;
+        for (let i1 = 0; i1 < codes.length; i1++) {
+          const v1 = condition.extract_start ? extractSubstring(codes[i1], condition.extract_start, condition.extract_end) : codes[i1];
           if (!v1) continue;
           for (const code2 of codes) {
             const v2 = peerCondition && peerCondition.extract_start ? extractSubstring(code2, peerCondition.extract_start, peerCondition.extract_end) : code2;
-            if (v2 && v1 === v2) { match = true; matchedValue = v1; expectedValue = v2; break outer; }
+            if (v2 && v1 === v2) { match = true; matchedValue = v1; expectedValue = v2; matchedIdx = i1; break outer; }
           }
         }
         if (!match) matchedValue = (attempts.find(a => a.value && claimedBy[a.idx] === null) || attempts.find(a => a.value) || {}).value || null;
         detail = match ? 'مطابق' : 'لم يتم إيجاد تطابق بين الأكواد المسكونة';
         if (!match) { overallResult = 'ng'; mismatchDetails.push(`${condition.name}: عدم تطابق`); }
 
+        if (match) {
+          const fullScannedCode = matchedIdx !== null ? codes[matchedIdx] : matchedValue;
+          registerDuplicateLog(stationId, condition.order_index, fullScannedCode); // تسجيل دائم (لمقارنة شرط تاني/محطة تانية لاحقًا)
+
+          if (condition.verify_station_id) {
+            const seenAtOtherStation = stationHasValueInLog(condition.verify_station_id, fullScannedCode);
+            if (!seenAtOtherStation) {
+              match = false;
+              hasNotVerified = true;
+              detail = 'لم يتم اختبار هذه الوحدة في المحطة المطلوبة';
+              overallResult = 'ng';
+              mismatchDetails.push(`${condition.name}: لم تُختبر في المحطة المطلوبة`);
+            }
+          }
+        }
+
       } else if (condition.comparison_type === 'database') {
         const result = findDbMatch(condition, attempts, false);
         if (result && claimedBy[result.attempt.idx] === condition.order_index) {
           matchedValue = result.attempt.value;
           expectedValue = result.found.expected_values[condition.order_index];
+          // للتكرار بنستخدم الكود الكامل اللي اتسكان فعليًا (مش الجزء المستخرج بس)
+          // عشان يفضل صالح للاستخدام مع منع التكرار وأي مقارنة شرط تاني أو محطة تانية بيه لاحقًا
+          const fullScannedCode = codes[result.attempt.idx];
 
-          const isDup = condition.prevent_duplicate && isDuplicateInLog(stationId, condition.order_index, matchedValue);
-          if (isDup) {
+          const firstSeenAt = condition.prevent_duplicate ? isDuplicateInLog(stationId, condition.order_index, fullScannedCode) : undefined;
+          if (firstSeenAt) {
             match = false;
             hasDuplicate = true;
-            detail = 'القيمة دي اتسكانت قبل كده (مكررة)';
+            const whenText = formatDate(firstSeenAt);
+            detail = `القيمة دي اتسكانت قبل كده (مكررة) — أول مرة كانت: ${whenText}`;
             overallResult = 'ng';
-            mismatchDetails.push(`${condition.name}: "${matchedValue}" مكررة`);
+            mismatchDetails.push(`${condition.name}: "${fullScannedCode}" مكررة (أول مرة: ${whenText})`);
           } else {
             match = true;
             detail = 'موجود في قاعدة البيانات';
-            if (condition.prevent_duplicate) {
-              registerDuplicateLog(stationId, condition.order_index, matchedValue);
+            // تسجيل دائم للكود الكامل - سواء "منع تكرار" مفعّل أو لأ، عشان يفضل صالح
+            // لأي محطة تانية تعمل "تحقق من محطة سابقة" وتدور على السجل ده
+            registerDuplicateLog(stationId, condition.order_index, fullScannedCode);
+
+            if (condition.verify_station_id) {
+              const seenAtOtherStation = stationHasValueInLog(condition.verify_station_id, fullScannedCode);
+              if (!seenAtOtherStation) {
+                match = false;
+                hasNotVerified = true;
+                detail = 'لم يتم اختبار هذه الوحدة في المحطة المطلوبة';
+                overallResult = 'ng';
+                mismatchDetails.push(`${condition.name}: لم تُختبر في المحطة المطلوبة`);
+              }
             }
           }
         } else {
@@ -736,19 +792,34 @@ async function runComparison() {
           detail = 'لا يوجد كود صالح للحفظ';
         } else {
           if (chosen) claimedBy[chosen.idx] = condition.order_index;
-          const isDup = condition.prevent_duplicate &&
-            (allRefRows || []).some(r => String(r.expected_values?.[condition.order_index]) === String(matchedValue));
+          const fullScannedCode = codes[chosen.idx];
+          const dupRow = condition.prevent_duplicate
+            ? (allRefRows || []).find(r => String(r.expected_values?.[condition.order_index]) === String(matchedValue))
+            : null;
 
-          if (isDup) {
+          if (dupRow) {
             match = false;
             hasDuplicate = true;
-            detail = 'القيمة دي مسجلة قبل كده (مكررة)';
+            const whenText = formatDate(dupRow.created_at);
+            detail = `القيمة دي مسجلة قبل كده (مكررة) — أول مرة كانت: ${whenText}`;
             overallResult = 'ng';
-            mismatchDetails.push(`${condition.name}: "${matchedValue}" مكررة`);
+            mismatchDetails.push(`${condition.name}: "${matchedValue}" مكررة (أول مرة: ${whenText})`);
           } else {
             match = true;
             detail = 'هيتم حفظها';
             pendingSaveValues[condition.order_index] = matchedValue;
+            registerDuplicateLog(stationId, condition.order_index, fullScannedCode);
+
+            if (condition.verify_station_id) {
+              const seenAtOtherStation = stationHasValueInLog(condition.verify_station_id, fullScannedCode);
+              if (!seenAtOtherStation) {
+                match = false;
+                hasNotVerified = true;
+                detail = 'لم يتم اختبار هذه الوحدة في المحطة المطلوبة';
+                overallResult = 'ng';
+                mismatchDetails.push(`${condition.name}: لم تُختبر في المحطة المطلوبة`);
+              }
+            }
           }
         }
       }
@@ -767,7 +838,7 @@ async function runComparison() {
     }
 
     // Show result فورًا (الأولوية: سكراب > مكرر > NG > غير موجود > معلق > OK) - من غير ما ننتظر حفظ السجل
-    showResult(overallResult, conditionResults, codes, defectFlag, hasDuplicate);
+    showResult(overallResult, conditionResults, codes, defectFlag, hasDuplicate, hasNotVerified);
     updateStats(overallResult);
 
     // حفظ أي قيم "حفظ" جديدة نجحت (مش مكررة) - محليًا فورًا (عشان لو نفس القيمة
@@ -811,19 +882,20 @@ async function runComparison() {
 // =========================================================
 // Show Result Overlay
 // =========================================================
-function showResult(result, conditionResults, codes, defectFlag, hasDuplicate) {
+function showResult(result, conditionResults, codes, defectFlag, hasDuplicate, hasNotVerified) {
   const overlay = document.getElementById('resultOverlay');
   const icon = document.getElementById('resultIcon');
   const text = document.getElementById('resultText');
   const sub = document.getElementById('resultSub');
   const detail = document.getElementById('resultDetail');
 
-  // الأولوية في العرض: سكراب > مكرر > NG (شامل "غير موجود في قاعدة البيانات") > معلق (لسه من غير قرار) > OK
+  // الأولوية في العرض: سكراب > مكرر > لم تُختبر بمحطة سابقة > NG > معلق (لسه من غير قرار) > OK
   // ملحوظة: النتيجة دي دايمًا حية (بتتحسب من جديد كل سكان) - لو المشكلة لسه موجودة هتفضل تظهر
   // لحد ما حد يعدّل الحالة من نظام تسجيل العيوب أو يضيف القيمة الناقصة في القاعدة المرجعية
   let displayState = result;
   if (defectFlag === 'scrap') displayState = 'scrap';
   else if (hasDuplicate) displayState = 'duplicate';
+  else if (hasNotVerified) displayState = 'not_verified';
   else if (result === 'ok' && defectFlag === 'pending') displayState = 'pending_defect';
 
   overlay.className = 'result-overlay show ' + displayState;
@@ -836,8 +908,14 @@ function showResult(result, conditionResults, codes, defectFlag, hasDuplicate) {
   } else if (displayState === 'duplicate') {
     icon.textContent = '🔁';
     text.textContent = 'مكرر';
-    const dupNames = conditionResults.filter(cr => cr.comparison_type === 'save' && !cr.match).map(cr => cr.condition_name);
-    sub.textContent = '⚠️ القيمة دي اتسكانت قبل كده: ' + (dupNames.join('، ') || '');
+    const dupConditions = conditionResults.filter(cr => !cr.match && (cr.comparison_type === 'save' || cr.comparison_type === 'database' || cr.comparison_type === 'peer'));
+    const dupNames = dupConditions.map(cr => cr.condition_name);
+    sub.textContent = '⚠️ القيمة دي اتسكانت قبل كده: ' + (dupNames.join('، ') || '') + ' — التفاصيل والتاريخ تحت 👇';
+  } else if (displayState === 'not_verified') {
+    icon.textContent = '🚧';
+    text.textContent = 'لم تُختبر';
+    const nvNames = conditionResults.filter(cr => !cr.match).map(cr => cr.condition_name);
+    sub.textContent = '⚠️ الوحدة دي لم تمرّ على المحطة المطلوبة: ' + (nvNames.join('، ') || '');
   } else if (displayState === 'ng') {
     icon.textContent = '✘';
     text.textContent = 'NG';
@@ -871,7 +949,7 @@ function showResult(result, conditionResults, codes, defectFlag, hasDuplicate) {
   const failedConditions = conditionResults.filter(cr => !cr.match);
   let detailHtml = '';
 
-  if ((displayState === 'ng' || displayState === 'duplicate') && failedConditions.length > 0) {
+  if ((displayState === 'ng' || displayState === 'duplicate' || displayState === 'not_verified') && failedConditions.length > 0) {
     detailHtml += failedConditions.map(cr => {
       return `
         <div class="detail-row">
