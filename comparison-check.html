@@ -636,6 +636,7 @@ async function invalidateRefRowsCache(stationId) {
 }
 
 let comparisonInProgress = false;
+let resultAutoCloseTimer = null; // لإغلاق نتيجة OK تلقائيًا من غير انتظار ضغطة زرار
 async function runComparison() {
   if (comparisonInProgress) return;
   if (!currentStation) { resetScanBuffer(); return; }
@@ -935,6 +936,17 @@ function showResult(result, conditionResults, codes, defectFlag, hasDuplicate, h
     sub.textContent = '✅ جميع الشروط مطابقة — المنتج سليم';
   }
 
+  // النتيجة OK بتكمل تلقائي من غير ما تستنى ضغطة زرار - عشان متبطئش خط الإنتاج للوحدات
+  // السليمة. أي مشكلة (NG/سكراب/مكرر/معلق/لم تُختبر) لازم تتقفل يدويًا عشان الفني يلاحظها فعلًا
+  const closeBtn = document.getElementById('resultCloseBtn');
+  if (resultAutoCloseTimer) { clearTimeout(resultAutoCloseTimer); resultAutoCloseTimer = null; }
+  if (displayState === 'ok') {
+    closeBtn.style.display = 'none';
+    resultAutoCloseTimer = setTimeout(() => closeResultOverlay(), 1200);
+  } else {
+    closeBtn.style.display = 'inline-block';
+  }
+
   // زرار تسجيل موديل ناقص من قاعدة البيانات المرجعية - للأدمن/المشرف العام بس، ولو فيه شرط مش موجود فعلاً
   const missingConditions = conditionResults.filter(cr => cr.comparison_type === 'database' && !cr.match);
   const registerBtnWrap = document.getElementById('registerMissingWrap');
@@ -973,11 +985,14 @@ function showResult(result, conditionResults, codes, defectFlag, hasDuplicate, h
   detail.style.display = detailHtml ? 'block' : 'none';
 }
 
-document.getElementById('resultCloseBtn').addEventListener('click', () => {
+function closeResultOverlay() {
+  if (resultAutoCloseTimer) { clearTimeout(resultAutoCloseTimer); resultAutoCloseTimer = null; }
   document.getElementById('resultOverlay').classList.remove('show');
   document.getElementById('registerMissingWrap').style.display = 'none';
   resetScanBuffer();
-});
+}
+
+document.getElementById('resultCloseBtn').addEventListener('click', closeResultOverlay);
 
 // تسجيل موديل ناقص من قاعدة البيانات المرجعية مباشرة من شاشة النتيجة (أدمن/مشرف عام بس)
 document.getElementById('registerMissingBtn').addEventListener('click', async () => {
