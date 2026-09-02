@@ -647,7 +647,7 @@ function renderConditionRow(c) {
   return `
     <div class="condition-row" data-condition-id="${c.id}" data-station-id="${c.station_id}">
       <input type="text" class="cond-name" value="${c.name}" placeholder="اسم الشرط" />
-      <input type="text" class="cond-extract" value="${c.extract_start ? c.extract_start + '-' + c.extract_end : ''}" placeholder="مدى الاستخراج مثل 4-11" />
+      <input type="text" class="cond-extract" value="${c.extract_start ? c.extract_start + '-' + c.extract_end : ''}" placeholder="مدى الاستخراج مثل 4-11" style="display:${c.comparison_type === 'peer' ? 'none' : 'block'};" />
       <select class="cond-type" onchange="toggleCondDuplicateCb(this)">
         <option value="database" ${c.comparison_type === 'database' ? 'selected' : ''}>مقارنة مع قاعدة البيانات</option>
         <option value="peer" ${c.comparison_type === 'peer' ? 'selected' : ''}>مقارنة مباشرة مع شرط تاني</option>
@@ -675,7 +675,9 @@ function renderConditionRow(c) {
 }
 
 function toggleCondDuplicateCb(selectEl) {
-  // اتاحت لكل الأنواع دلوقتي (بما فيهم "مقارنة بشرط تاني")
+  const row = selectEl.closest('.condition-row');
+  const extractInput = row.querySelector('.cond-extract');
+  extractInput.style.display = selectEl.value === 'peer' ? 'none' : 'block';
 }
 
 // منع تكرار وتحقق من محطة سابقة متبادلين - اختيار واحد بس يشتغل في نفس الوقت
@@ -717,7 +719,7 @@ async function saveConditionRow(conditionId) {
   const verifyStationId = row.querySelector('.cond-verify-station').value;
 
   let extractStart = null, extractEnd = null;
-  if (extractRaw.includes('-')) {
+  if (type !== 'peer' && extractRaw.includes('-')) {
     const parts = extractRaw.split('-').map(v => parseInt(v.trim(), 10));
     if (!isNaN(parts[0]) && !isNaN(parts[1])) { extractStart = parts[0]; extractEnd = parts[1]; }
   }
