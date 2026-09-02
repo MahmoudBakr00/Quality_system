@@ -646,17 +646,26 @@ function renderConditionRow(c) {
     <div class="condition-row" data-condition-id="${c.id}">
       <input type="text" class="cond-name" value="${c.name}" placeholder="اسم الشرط" />
       <input type="text" class="cond-extract" value="${c.extract_start ? c.extract_start + '-' + c.extract_end : ''}" placeholder="مدى الاستخراج مثل 4-11" />
-      <select class="cond-type">
+      <select class="cond-type" onchange="toggleCondDuplicateCb(this)">
         <option value="database" ${c.comparison_type === 'database' ? 'selected' : ''}>مقارنة مع قاعدة البيانات</option>
         <option value="peer" ${c.comparison_type === 'peer' ? 'selected' : ''}>مقارنة مباشرة مع شرط تاني</option>
+        <option value="save" ${c.comparison_type === 'save' ? 'selected' : ''}>💾 حفظ (تسجيل كل قيمة تتسكان)</option>
       </select>
       <input type="number" class="cond-peer" value="${c.peer_condition_order || ''}" placeholder="رقم الشرط (لو مباشرة)" min="1" />
+      <label style="display:${c.comparison_type === 'save' ? 'flex' : 'none'}; align-items:center; gap:4px; font-size:11px; font-weight:normal; white-space:nowrap;" class="cond-duplicate-wrap">
+        <input type="checkbox" class="cond-duplicate" ${c.prevent_duplicate ? 'checked' : ''} /> 🚫 منع تكرار القيمة
+      </label>
       <div style="display:flex; gap:4px;">
         <button class="small-btn" onclick="saveConditionRow('${c.id}')">💾</button>
         <button class="small-btn danger" onclick="deleteConditionRow('${c.id}')">🗑</button>
       </div>
     </div>
   `;
+}
+
+function toggleCondDuplicateCb(selectEl) {
+  const wrap = selectEl.closest('.condition-row').querySelector('.cond-duplicate-wrap');
+  wrap.style.display = selectEl.value === 'save' ? 'flex' : 'none';
 }
 
 async function addConditionRow(stationId) {
@@ -677,6 +686,7 @@ async function saveConditionRow(conditionId) {
   const extractRaw = row.querySelector('.cond-extract').value.trim();
   const type = row.querySelector('.cond-type').value;
   const peerOrder = row.querySelector('.cond-peer').value.trim();
+  const preventDuplicate = row.querySelector('.cond-duplicate').checked;
 
   let extractStart = null, extractEnd = null;
   if (extractRaw.includes('-')) {
@@ -690,6 +700,7 @@ async function saveConditionRow(conditionId) {
   const { error } = await sbClient.from('comparison_conditions').update({
     name, extract_start: extractStart, extract_end: extractEnd,
     comparison_type: type, peer_condition_order: type === 'peer' ? parseInt(peerOrder, 10) : null,
+    prevent_duplicate: type === 'save' ? preventDuplicate : false,
   }).eq('id', conditionId);
 
   if (error) { alert('❌ ' + error.message); return; }
@@ -928,7 +939,8 @@ function renderScanWizard(stationId) {
         ${items.length === 0 ? '<span style="color:#64748b; font-size:12px;">لسه معملتش أي شرط في الجلسة دي</span>' :
           items.map((it, idx) => `
             <span class="wizard-cond-chip">
-              ${idx + 1}. ${it.name} ${it.extract_start ? `(${it.extract_start}-${it.extract_end})` : ''} = "${it.value}"
+              ${idx + 1}. ${it.name} ${it.extract_start ? `(${it.extract_start}-${it.extract_end})` : ''}
+              ${it.type === 'save' ? `💾${it.preventDuplicate ? ' 🚫منع تكرار' : ''}` : `= "${it.value}"`}
               <button onclick="removeWizardCondition('${stationId}', ${idx})">✕</button>
             </span>
           `).join('')}
@@ -938,8 +950,9 @@ function renderScanWizard(stationId) {
       <input type="text" id="wzName-${stationId}" placeholder="مثال: كود الموديل" />
 
       <div class="wizard-type-row">
-        <label><input type="radio" name="wzType-${stationId}" value="full" checked onchange="toggleWizardExtract('${stationId}')" /> مقارنة / تحقق (القيمة كاملة)</label>
-        <label><input type="radio" name="wzType-${stationId}" value="extract" onchange="toggleWizardExtract('${stationId}')" /> استخراج (جزء من القيمة)</label>
+        <label><input type="radio" name="wzType-${stationId}" value="full" checked onchange="toggleWizardExtract('${stationId}')" /> 1. مقارنة مع قاعدة بيانات (القيمة كاملة)</label>
+        <label><input type="radio" name="wzType-${stationId}" value="extract" onchange="toggleWizardExtract('${stationId}')" /> 2. استخراج (جزء من القيمة)</label>
+        <label><input type="radio" name="wzType-${stationId}" value="save" onchange="toggleWizardExtract('${stationId}')" /> 3. 💾 حفظ (تسجيل كل قيمة تتسكان)</label>
       </div>
 
       <div class="wizard-extract-row" id="wzExtractRow-${stationId}">
@@ -947,7 +960,11 @@ function renderScanWizard(stationId) {
         <input type="number" id="wzEnd-${stationId}" placeholder="إلى (رقم الحرف)" min="1" oninput="updateWizardPreview('${stationId}')" />
       </div>
 
-      <label style="margin-top:10px;">القيمة المرجعية (اسكانها من الوحدة الفعلية أو اكتبها يدويًا)</label>
+      <label style="display:none; align-items:center; gap:6px; font-weight:normal; margin-top:8px;" id="wzDuplicateWrap-${stationId}">
+        <input type="checkbox" id="wzDuplicate-${stationId}" /> 🚫 منع تكرار القيمة (لو اتسكانت قبل كده، هيظهر خطأ "مكرر")
+      </label>
+
+      <label style="margin-top:10px;" id="wzValueLabel-${stationId}">القيمة المرجعية (اسكانها من الوحدة الفعلية أو اكتبها يدويًا)</label>
       <div class="wizard-scan-row">
         <input type="text" id="wzValue-${stationId}" placeholder="سكان أو كتابة يدوية" oninput="updateWizardPreview('${stationId}')" />
         <button type="button" class="wizard-scan-btn" onclick="openDashScanner(v => { document.getElementById('wzValue-${stationId}').value = v; updateWizardPreview('${stationId}'); })">📷 سكان</button>
@@ -966,6 +983,10 @@ function renderScanWizard(stationId) {
 function toggleWizardExtract(stationId) {
   const type = document.querySelector(`input[name="wzType-${stationId}"]:checked`).value;
   document.getElementById(`wzExtractRow-${stationId}`).classList.toggle('show', type === 'extract');
+  document.getElementById(`wzDuplicateWrap-${stationId}`).style.display = type === 'save' ? 'flex' : 'none';
+  document.getElementById(`wzValueLabel-${stationId}`).textContent = type === 'save'
+    ? 'قيمة أولى (اختياري - ممكن تسيبها فاضية وتبدأ التسجيل من أول سكان فعلي على الخط)'
+    : 'القيمة المرجعية (اسكانها من الوحدة الفعلية أو اكتبها يدويًا)';
   updateWizardPreview(stationId);
 }
 
@@ -978,6 +999,8 @@ function updateWizardPreview(stationId) {
     const end = parseInt(document.getElementById(`wzEnd-${stationId}`).value, 10);
     const extracted = extractPreview(value, start, end);
     preview.textContent = value ? `القيمة اللي هتتسجل كمرجع: "${extracted || 'N/A'}"` : '';
+  } else if (type === 'save') {
+    preview.textContent = value ? `القيمة الأولى اللي هتتسجل: "${value}"` : '';
   } else {
     preview.textContent = value ? `القيمة اللي هتتسجل كمرجع: "${value}"` : '';
   }
@@ -987,11 +1010,12 @@ function addWizardCondition(stationId) {
   const name = document.getElementById(`wzName-${stationId}`).value.trim();
   const type = document.querySelector(`input[name="wzType-${stationId}"]:checked`).value;
   const rawValue = document.getElementById(`wzValue-${stationId}`).value.trim();
+  const preventDuplicate = type === 'save' ? document.getElementById(`wzDuplicate-${stationId}`).checked : false;
 
   if (!name) { alert('⚠️ اكتب اسم الشرط'); return; }
-  if (!rawValue) { alert('⚠️ اسكان أو اكتب القيمة المرجعية'); return; }
+  if (type !== 'save' && !rawValue) { alert('⚠️ اسكان أو اكتب القيمة المرجعية'); return; }
 
-  let extractStart = null, extractEnd = null, value = rawValue;
+  let extractStart = null, extractEnd = null, value = rawValue || null;
   if (type === 'extract') {
     extractStart = parseInt(document.getElementById(`wzStart-${stationId}`).value, 10);
     extractEnd = parseInt(document.getElementById(`wzEnd-${stationId}`).value, 10);
@@ -1000,7 +1024,12 @@ function addWizardCondition(stationId) {
     if (!value) { alert('⚠️ المدى المحدد أطول من القيمة اللي اتكتبت'); return; }
   }
 
-  scanWizardState[stationId].push({ name, extract_start: extractStart, extract_end: extractEnd, value });
+  scanWizardState[stationId].push({
+    name,
+    type: type === 'save' ? 'save' : 'database',
+    extract_start: extractStart, extract_end: extractEnd,
+    value, preventDuplicate
+  });
   renderScanWizard(stationId);
 }
 
@@ -1012,24 +1041,33 @@ function removeWizardCondition(stationId, idx) {
 async function finishScanWizard(stationId) {
   const items = scanWizardState[stationId] || [];
   if (items.length === 0) { alert('⚠️ لازم تضيف شرط واحد على الأقل'); return; }
-  if (!confirm(`هيتم إنشاء ${items.length} شرط وتسجيل أول قيمة مرجعية للمحطة. متابعة؟`)) return;
+  if (!confirm(`هيتم إنشاء ${items.length} شرط للمحطة. متابعة؟`)) return;
 
   try {
     const conditionsToInsert = items.map((it, idx) => ({
       station_id: stationId, order_index: idx + 1, name: it.name,
-      extract_start: it.extract_start, extract_end: it.extract_end, comparison_type: 'database',
+      extract_start: it.extract_start, extract_end: it.extract_end,
+      comparison_type: it.type === 'save' ? 'save' : 'database',
+      prevent_duplicate: it.type === 'save' ? !!it.preventDuplicate : false,
     }));
 
     const { data: insertedConditions, error: condErr } = await sbClient
       .from('comparison_conditions').insert(conditionsToInsert).select('*').order('order_index');
     if (condErr) throw condErr;
 
+    // القيمة الأولى بتتسجل بس للشروط اللي عندها قيمة فعلية (مقارنة/استخراج، أو حفظ لو
+    // اتكتبت قيمة أولى اختيارية) - شروط "حفظ" من غير قيمة أولى بتبدأ فاضية وتتسجل من أول سكان حقيقي
     const expectedValues = {};
-    insertedConditions.forEach((c, idx) => { expectedValues[c.order_index] = items[idx].value; });
+    let hasAnyValue = false;
+    insertedConditions.forEach((c, idx) => {
+      if (items[idx].value) { expectedValues[c.order_index] = items[idx].value; hasAnyValue = true; }
+    });
 
-    const { error: refErr } = await sbClient.from('comparison_reference_data')
-      .insert([{ station_id: stationId, expected_values: expectedValues }]);
-    if (refErr) throw refErr;
+    if (hasAnyValue) {
+      const { error: refErr } = await sbClient.from('comparison_reference_data')
+        .insert([{ station_id: stationId, expected_values: expectedValues }]);
+      if (refErr) throw refErr;
+    }
 
     await syncScansPerUnit(stationId);
     alert('✅ تم إعداد المحطة بنجاح، وبتسحب داتا طبيعي دلوقتي');
@@ -1110,6 +1148,8 @@ async function saveRegisteredValue(stationId) {
 // عرض/إخفاء كل القيم (الموديلات) المسجلة فعليًا لمحطة معينة
 // =========================================================
 const refDataCache = {}; // stationId -> {conditions, rows}
+const refDataParetoState = {}; // stationId -> {groupBy: order_index, selectedValue: string|null}
+const refDataParetoChartInstances = {}; // stationId -> Chart instance
 
 async function toggleReferenceDataView(stationId) {
   const view = document.getElementById(`refDataView-${stationId}`);
@@ -1119,6 +1159,7 @@ async function toggleReferenceDataView(stationId) {
   if (isOpen) {
     view.style.display = 'none';
     btn.textContent = '👁 عرض القيم المسجلة';
+    if (refDataParetoChartInstances[stationId]) { refDataParetoChartInstances[stationId].destroy(); delete refDataParetoChartInstances[stationId]; }
     return;
   }
 
@@ -1128,7 +1169,7 @@ async function toggleReferenceDataView(stationId) {
 
   try {
     const { data: conditions, error: cErr } = await sbClient.from('comparison_conditions')
-      .select('*').eq('station_id', stationId).eq('comparison_type', 'database').order('order_index');
+      .select('*').eq('station_id', stationId).in('comparison_type', ['database', 'save']).order('order_index');
     if (cErr) throw cErr;
 
     const { data: rows, error: rErr } = await sbClient.from('comparison_reference_data')
@@ -1136,6 +1177,9 @@ async function toggleReferenceDataView(stationId) {
     if (rErr) throw rErr;
 
     refDataCache[stationId] = { conditions: conditions || [], rows: rows || [] };
+    if (!refDataParetoState[stationId]) {
+      refDataParetoState[stationId] = { groupBy: conditions && conditions.length > 0 ? conditions[0].order_index : null, selectedValue: null };
+    }
     renderReferenceDataTable(stationId, '');
   } catch (err) {
     view.innerHTML = `<div style="color:#f87171; font-size:12px;">❌ حصل خطأ: ${err.message}</div>`;
@@ -1147,20 +1191,26 @@ function renderReferenceDataTable(stationId, searchTerm) {
   const cache = refDataCache[stationId];
   if (!cache) return;
   const { conditions, rows } = cache;
+  const paretoState = refDataParetoState[stationId] || { groupBy: null, selectedValue: null };
 
   if (conditions.length === 0) {
-    view.innerHTML = '<div style="color:#fbbf24; font-size:12px; padding:10px;">⚠️ المحطة دي مفيهاش شروط من نوع "مقارنة/تحقق"</div>';
+    view.innerHTML = '<div style="color:#fbbf24; font-size:12px; padding:10px;">⚠️ المحطة دي مفيهاش شروط من نوع "مقارنة/تحقق" أو "حفظ"</div>';
     return;
   }
-
-  const term = (searchTerm || '').trim().toLowerCase();
-  const filteredRows = term
-    ? rows.filter(r => Object.values(r.expected_values || {}).some(v => String(v).toLowerCase().includes(term)))
-    : rows;
 
   if (rows.length === 0) {
     view.innerHTML = '<div style="color:#64748b; font-size:12px; padding:10px;">📭 لا توجد أي قيم مسجلة لهذه المحطة بعد</div>';
     return;
+  }
+
+  const term = (searchTerm || '').trim().toLowerCase();
+  let filteredRows = term
+    ? rows.filter(r => Object.values(r.expected_values || {}).some(v => String(v).toLowerCase().includes(term)))
+    : rows;
+
+  // فلتر الباريتو (لو فيه عمود مختار بالدوسة على الرسم)
+  if (paretoState.groupBy !== null && paretoState.selectedValue !== null) {
+    filteredRows = filteredRows.filter(r => String((r.expected_values || {})[paretoState.groupBy] || '-') === paretoState.selectedValue);
   }
 
   const tableRows = filteredRows.map(r => `
@@ -1176,8 +1226,26 @@ function renderReferenceDataTable(stationId, searchTerm) {
   `).join('');
 
   const hasExtractionConditions = conditions.some(c => c.extract_start && c.extract_end);
+  const activeFilterChip = (paretoState.groupBy !== null && paretoState.selectedValue !== null) ? `
+    <span style="background:#334155; color:#fbbf24; padding:6px 14px; border-radius:20px; font-size:12px; font-weight:bold; display:inline-flex; align-items:center; gap:8px; margin-bottom:10px;">
+      🎯 فلتر الباريتو النشط: ${(conditions.find(c => c.order_index === paretoState.groupBy) || {}).name || ''} = ${paretoState.selectedValue}
+      <button onclick="clearRefDataParetoFilter('${stationId}')" style="background:#ef4444; color:white; border:none; border-radius:50%; width:18px; height:18px; cursor:pointer; font-size:11px; line-height:1; padding:0;">✕</button>
+    </span>
+  ` : '';
 
   view.innerHTML = `
+    <div style="display:flex; align-items:center; gap:10px; margin: 4px 0 10px; flex-wrap:wrap;">
+      <label style="color:#94a3b8; font-size:13px;">📊 باريتو - تجميع حسب:</label>
+      <select id="refParetoGroupBy-${stationId}" onchange="changeRefDataParetoGroupBy('${stationId}', this.value)">
+        ${conditions.map(c => `<option value="${c.order_index}" ${paretoState.groupBy === c.order_index ? 'selected' : ''}>${c.name}</option>`).join('')}
+      </select>
+    </div>
+    <div style="color:#94a3b8; font-size:12px; margin-bottom:10px;">💡 دوس على أي عمود في الرسم عشان تفلتر الجدول تحت بيه</div>
+    ${activeFilterChip}
+    <div style="position:relative; height:240px; margin-bottom:20px;">
+      <canvas id="refParetoCanvas-${stationId}"></canvas>
+    </div>
+
     <input type="text" class="ref-data-search" placeholder="🔍 دور في القيم المسجلة..." oninput="renderReferenceDataTable('${stationId}', this.value)" value="${searchTerm ? searchTerm.replace(/"/g, '&quot;') : ''}" />
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; flex-wrap:wrap; gap:8px;">
       <div style="color:#64748b; font-size:11px;">عدد النتائج: ${filteredRows.length} من ${rows.length} ${hasExtractionConditions ? '(⚠️ = القيمة طولها مش مطابق لمدى الاستخراج المحدد، يحتمل تكون قيمة كاملة مش مقصوصة)' : ''}</div>
@@ -1195,6 +1263,70 @@ function renderReferenceDataTable(stationId, searchTerm) {
       </table>
     </div>
   `;
+
+  renderRefDataParetoChart(stationId);
+}
+
+function changeRefDataParetoGroupBy(stationId, orderIndexStr) {
+  refDataParetoState[stationId] = { groupBy: parseInt(orderIndexStr, 10), selectedValue: null };
+  renderReferenceDataTable(stationId, document.querySelector(`#refDataView-${stationId} .ref-data-search`)?.value || '');
+}
+
+function clearRefDataParetoFilter(stationId) {
+  refDataParetoState[stationId].selectedValue = null;
+  renderReferenceDataTable(stationId, document.querySelector(`#refDataView-${stationId} .ref-data-search`)?.value || '');
+}
+
+function renderRefDataParetoChart(stationId) {
+  const cache = refDataCache[stationId];
+  const paretoState = refDataParetoState[stationId];
+  const canvas = document.getElementById(`refParetoCanvas-${stationId}`);
+  if (!cache || !paretoState || !canvas || paretoState.groupBy === null) return;
+
+  const counts = {};
+  cache.rows.forEach(r => {
+    const key = String((r.expected_values || {})[paretoState.groupBy] || '-');
+    counts[key] = (counts[key] || 0) + 1;
+  });
+
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const labels = sorted.map(([k]) => k);
+  const values = sorted.map(([, v]) => v);
+  const total = values.reduce((a, b) => a + b, 0);
+
+  let running = 0;
+  const cumulative = values.map(v => { running += v; return +((running / total) * 100).toFixed(1); });
+
+  const barColors = labels.map(l => paretoState.selectedValue === l ? '#f59e0b' : '#3b82f6');
+
+  if (refDataParetoChartInstances[stationId]) refDataParetoChartInstances[stationId].destroy();
+  refDataParetoChartInstances[stationId] = new Chart(canvas, {
+    data: {
+      labels,
+      datasets: [
+        { type: 'bar', label: 'عدد الصفوف', data: values, backgroundColor: barColors, order: 2 },
+        { type: 'line', label: 'النسبة التراكمية %', data: cumulative, borderColor: '#fbbf24', backgroundColor: '#fbbf24', yAxisID: 'y1', order: 1, tension: 0.2 },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      onHover: (evt, elements) => { canvas.style.cursor = elements.length ? 'pointer' : 'default'; },
+      onClick: (evt, elements) => {
+        if (!elements || elements.length === 0) return;
+        const idx = elements[0].index;
+        const clickedLabel = labels[idx];
+        paretoState.selectedValue = paretoState.selectedValue === clickedLabel ? null : clickedLabel;
+        renderReferenceDataTable(stationId, document.querySelector(`#refDataView-${stationId} .ref-data-search`)?.value || '');
+      },
+      plugins: { legend: { labels: { color: '#e2e8f0', font: { size: 10 } } } },
+      scales: {
+        x: { ticks: { color: '#94a3b8', font: { size: 10 } }, grid: { color: '#334155' } },
+        y: { beginAtZero: true, ticks: { color: '#94a3b8', font: { size: 10 } }, grid: { color: '#334155' } },
+        y1: { position: 'right', beginAtZero: true, max: 100, ticks: { color: '#fbbf24', font: { size: 10 } }, grid: { display: false } },
+      },
+    },
+  });
 }
 
 async function deleteReferenceDataRow(stationId, rowId) {
@@ -1216,7 +1348,7 @@ async function fixReferenceDataExtraction(stationId) {
   let conditions, rows;
   try {
     const condRes = await sbClient.from('comparison_conditions')
-      .select('*').eq('station_id', stationId).eq('comparison_type', 'database').order('order_index');
+      .select('*').eq('station_id', stationId).in('comparison_type', ['database', 'save']).order('order_index');
     if (condRes.error) throw condRes.error;
     conditions = condRes.data || [];
 
