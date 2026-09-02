@@ -252,6 +252,7 @@ async function init() {
     const stationsEl = document.getElementById('stationsTab');
     stationsEl.classList.add('active');
     stationsEl.style.setProperty('display', 'block', 'important');
+    await loadStationsForFilter(); // بيملأ allStationsCache - مطلوبة لقائمة "تحقق من محطة سابقة"
     loadStationsManagement();
   } else {
     loadStationsForFilter();
