@@ -51,6 +51,7 @@ select:focus, input:focus { outline: 2px solid #3b82f6; }
 .result-overlay.undefined { background: linear-gradient(135deg, #d97706 0%, #fbbf24 100%); }
 .result-overlay.scrap { background: linear-gradient(135deg, #0f0f0f 0%, #3f0d0d 100%); }
 .result-overlay.pending_defect { background: linear-gradient(135deg, #581c87 0%, #a855f7 100%); }
+.result-overlay.duplicate { background: linear-gradient(135deg, #92400e 0%, #f59e0b 100%); }
 .register-missing-btn { background: rgba(255,255,255,0.15); color: white; border: 1px solid rgba(255,255,255,0.4); padding: 10px 20px; border-radius: 50px; font-size: 13px; font-weight: bold; cursor: pointer; margin-top: 10px; }
 .register-missing-btn:hover { background: rgba(255,255,255,0.25); }
 @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
@@ -428,7 +429,7 @@ document.getElementById('stationSelect').addEventListener('change', async (e) =>
 
     chips.innerHTML = currentConditions.map(c => `
       <span class="condition-chip">
-        <span class="chip-type ${c.comparison_type === 'peer' ? 'peer' : 'db'}">${c.comparison_type === 'peer' ? '🔗' : '📊'}</span>
+        <span class="chip-type ${c.comparison_type === 'peer' ? 'peer' : 'db'}">${c.comparison_type === 'peer' ? '🔗' : c.comparison_type === 'save' ? '💾' : '📊'}</span>
         ${c.order_index}. ${c.name}
         ${c.extract_start ? `<span style="color:#94a3b8;">(${c.extract_start}-${c.extract_end})</span>` : ''}
         ${c.comparison_type === 'peer' ? `<span style="color:#a78bfa;">← شرط #${c.peer_condition_order}</span>` : ''}
@@ -503,6 +504,11 @@ function playAlertSound(state) {
     beep(440, 200, 0, 0.2);
     beep(440, 200, 300, 0.2);
     beep(440, 200, 600, 0.2);
+  } else if (state === 'duplicate') {
+    // نغمة مميزة للتكرار: صفارتين متذبذبتين (عالي-واطي)
+    beep(700, 150, 0, 0.2);
+    beep(350, 150, 200, 0.2);
+    beep(700, 150, 400, 0.2);
   } else {
     // ng / undefined: صفارتين
     beep(523, 180, 0, 0.18);
@@ -618,6 +624,8 @@ async function runComparison() {
     const scannedValues = {};
     let overallResult = 'ok';
     let mismatchDetails = [];
+    let hasDuplicate = false;
+    const pendingSaveValues = {};
 
     // كل عنصر: {idx: رقم الكود في مصفوفة الأكواد, value: القيمة (مستخرجة أو كاملة)}
     // claimedBy[idx] = رقم ترتيب الشرط اللي "أخد" الكود ده بنجاح (عشان شرط تاني ميستخدمهوش
@@ -684,6 +692,30 @@ async function runComparison() {
         }
         detail = match ? 'موجود في قاعدة البيانات' : 'غير موجود في القاعدة المرجعية';
         if (!match) { overallResult = 'ng'; mismatchDetails.push(`${condition.name}: ${matchedValue || 'N/A'} غير موجود في DB`); }
+
+      } else if (condition.comparison_type === 'save') {
+        const chosen = attempts.find(a => a.value && claimedBy[a.idx] === null) || attempts.find(a => a.value);
+        matchedValue = chosen ? chosen.value : null;
+
+        if (!matchedValue) {
+          detail = 'لا يوجد كود صالح للحفظ';
+        } else {
+          if (chosen) claimedBy[chosen.idx] = condition.order_index;
+          const isDup = condition.prevent_duplicate &&
+            (allRefRows || []).some(r => String(r.expected_values?.[condition.order_index]) === String(matchedValue));
+
+          if (isDup) {
+            match = false;
+            hasDuplicate = true;
+            detail = 'القيمة دي مسجلة قبل كده (مكررة)';
+            overallResult = 'ng';
+            mismatchDetails.push(`${condition.name}: "${matchedValue}" مكررة`);
+          } else {
+            match = true;
+            detail = 'هيتم حفظها';
+            pendingSaveValues[condition.order_index] = matchedValue;
+          }
+        }
       }
 
       scannedValues[condition.order_index] = matchedValue;
@@ -699,9 +731,18 @@ async function runComparison() {
       });
     }
 
-    // Show result فورًا (الأولوية: سكراب > NG > غير موجود > معلق > OK) - من غير ما ننتظر حفظ السجل
-    showResult(overallResult, conditionResults, codes, defectFlag);
+    // Show result فورًا (الأولوية: سكراب > مكرر > NG > غير موجود > معلق > OK) - من غير ما ننتظر حفظ السجل
+    showResult(overallResult, conditionResults, codes, defectFlag, hasDuplicate);
     updateStats(overallResult);
+
+    // حفظ أي قيم "حفظ" جديدة نجحت (مش مكررة) - محليًا فورًا (عشان لو نفس القيمة
+    // اتسكانت تاني قبل ما السيرفر يرد تتكشف كمكررة فورًا) وعلى السيرفر في الخلفية
+    if (Object.keys(pendingSaveValues).length > 0) {
+      refRowsCacheMap[stationId] = [...(refRowsCacheMap[stationId] || []), { expected_values: pendingSaveValues }];
+      sbClient.from('comparison_reference_data').insert([{ station_id: stationId, expected_values: pendingSaveValues }])
+        .then(({ error }) => { if (error) console.warn('فشل حفظ القيمة:', error); });
+      updateStationRefCountLabel();
+    }
 
     // حفظ السجل وتحديث القائمة في الخلفية (من غير ما توقف عرض النتيجة على الشاشة)
     const logPayload = {
@@ -735,18 +776,19 @@ async function runComparison() {
 // =========================================================
 // Show Result Overlay
 // =========================================================
-function showResult(result, conditionResults, codes, defectFlag) {
+function showResult(result, conditionResults, codes, defectFlag, hasDuplicate) {
   const overlay = document.getElementById('resultOverlay');
   const icon = document.getElementById('resultIcon');
   const text = document.getElementById('resultText');
   const sub = document.getElementById('resultSub');
   const detail = document.getElementById('resultDetail');
 
-  // الأولوية في العرض: سكراب > NG (شامل "غير موجود في قاعدة البيانات") > معلق (لسه من غير قرار) > OK
+  // الأولوية في العرض: سكراب > مكرر > NG (شامل "غير موجود في قاعدة البيانات") > معلق (لسه من غير قرار) > OK
   // ملحوظة: النتيجة دي دايمًا حية (بتتحسب من جديد كل سكان) - لو المشكلة لسه موجودة هتفضل تظهر
   // لحد ما حد يعدّل الحالة من نظام تسجيل العيوب أو يضيف القيمة الناقصة في القاعدة المرجعية
   let displayState = result;
   if (defectFlag === 'scrap') displayState = 'scrap';
+  else if (hasDuplicate) displayState = 'duplicate';
   else if (result === 'ok' && defectFlag === 'pending') displayState = 'pending_defect';
 
   overlay.className = 'result-overlay show ' + displayState;
@@ -756,6 +798,11 @@ function showResult(result, conditionResults, codes, defectFlag) {
     icon.textContent = '💀';
     text.textContent = 'سكراب';
     sub.textContent = '🚫 الوحدة دي مقرر إنها سكراب — لازم تتحول ولا تكمل على الخط';
+  } else if (displayState === 'duplicate') {
+    icon.textContent = '🔁';
+    text.textContent = 'مكرر';
+    const dupNames = conditionResults.filter(cr => cr.comparison_type === 'save' && !cr.match).map(cr => cr.condition_name);
+    sub.textContent = '⚠️ القيمة دي اتسكانت قبل كده: ' + (dupNames.join('، ') || '');
   } else if (displayState === 'ng') {
     icon.textContent = '✘';
     text.textContent = 'NG';
@@ -789,10 +836,12 @@ function showResult(result, conditionResults, codes, defectFlag) {
   const failedConditions = conditionResults.filter(cr => !cr.match);
   let detailHtml = '';
 
-  if (displayState === 'ng' && failedConditions.length > 0) {
+  if ((displayState === 'ng' || displayState === 'duplicate') && failedConditions.length > 0) {
     detailHtml += failedConditions.map(cr => {
       const reason = cr.comparison_type === 'peer'
         ? 'مش متطابق مع الشرط المرتبط بيه'
+        : cr.comparison_type === 'save'
+        ? 'مسجلة قبل كده (مكررة)'
         : 'مش موجودة في القاعدة المرجعية';
       return `
         <div class="detail-row">
