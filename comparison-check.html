@@ -175,7 +175,9 @@ select:focus, input:focus { outline: 2px solid #3b82f6; }
 
     <label>📷 سكان</label>
     <div class="scan-row">
-      <input type="text" id="unifiedScanInput" placeholder="اسكان الكود أو اكتبه واضغط Enter" autocomplete="off" />
+      <div id="scanDisplayBox" tabindex="-1" style="flex:1; padding:12px 14px; border-radius:8px; background:#334155; color:#f1f5f9; font-size:15px; min-height:20px; direction:ltr; text-align:right; border:2px solid transparent;">اسكان أي كود دلوقتي...</div>
+      <input type="text" id="unifiedScanInput" autocomplete="off" style="position:absolute; width:1px; height:1px; opacity:0; pointer-events:none;" />
+      <button type="button" id="toggleKeyboardBtn" style="background:#334155; color:#f1f5f9; border:none; padding:0 12px; border-radius:8px; cursor:pointer; font-size:13px; white-space:nowrap;">⌨️ كتابة يدوية</button>
       <button type="button" class="scan-btn serial" id="openCameraScannerBtn">📷 كاميرا</button>
     </div>
     <div id="scanProgressWrap" style="display:none; margin: -10px 0 18px;">
@@ -246,8 +248,10 @@ async function init() {
   loadTodayStats();
   loadRecentLogs();
 
-  // Auto-focus on the single scan field
-  document.getElementById('unifiedScanInput').focus();
+  // ملحوظة: مفيش auto-focus على أي حقل نص هنا عن قصد - السكان بيتقرا من
+  // ضغطات الكيبورد على مستوى الصفحة كلها من غير فوكس، عشان الكيبورد
+  // مايظهرش تلقائي على أجهزة الـPDA/أندرويد
+  updateScanDisplay();
 }
 init();
 
@@ -363,8 +367,9 @@ let scanBuffer = [];
 function resetScanBuffer() {
   scanBuffer = [];
   renderScanProgress();
-  document.getElementById('unifiedScanInput').value = '';
-  document.getElementById('unifiedScanInput').focus();
+  scanCharBuffer = '';
+  updateScanDisplay();
+  if (manualModeActive) exitManualMode(); // يرجع وضع السكانر تلقائي بعد أي فحص يخلص
 }
 
 function renderScanProgress() {
@@ -408,44 +413,37 @@ async function handleScan(rawValue) {
   if (!currentStation) { alert('⚠️ اختر محطة الفحص أولاً'); return; }
 
   scanBuffer.push(value);
-  document.getElementById('unifiedScanInput').value = '';
+  scanCharBuffer = '';
+  updateScanDisplay();
   renderScanProgress();
 
   const expected = currentStation.scansPerUnit || 1;
   if (scanBuffer.length >= expected) {
     runComparison();
-  } else {
-    document.getElementById('unifiedScanInput').focus();
   }
 }
 
-document.getElementById('unifiedScanInput').addEventListener('keypress', (e) => {
-  if (e.key === 'Enter') {
-    e.preventDefault();
-    if (scanAutoSubmitTimer) { clearTimeout(scanAutoSubmitTimer); scanAutoSubmitTimer = null; }
-    handleScan(e.target.value);
-  }
-});
-
 // =========================================================
-// سكان من غير الحاجة لـ Enter: سكانرات الباركود اليدوية/الـPDA بتحقن
-// الحروف بسرعة جدًا (فاصل زمني صغير جدًا بين كل حرف والتاني) - بنكتشف
-// النمط ده تلقائيًا ونعمل submit بسرعة بعد ما السكان يخلص. لو الكتابة
-// بطيئة (يدوي بإيد الفني)، بنستنى فترة أطول قبل ما نعمل submit تلقائي
-// عشان منقطعش عليه وهو لسه بيكتب
+// سكان من غير التركيز على أي حقل نص خالص - عشان أجهزة الـPDA/أندرويد
+// ما تفتحش الكيبورد التلقائي أبدًا. بنسمع لضغطات لوحة المفاتيح على
+// مستوى الصفحة كلها (document) ونبني الكود بنفسنا في متغيّر، بدل ما
+// نعتمد على حقل نص لازم يبقى عليه فوكس عشان ياخد الكتابة
 // =========================================================
+let scanCharBuffer = '';
+let manualModeActive = false;
 let scanAutoSubmitTimer = null;
 let lastKeyTime = 0;
 let keyIntervals = [];
 
-document.getElementById('unifiedScanInput').addEventListener('input', (e) => {
-  const now = Date.now();
-  if (lastKeyTime) keyIntervals.push(now - lastKeyTime);
-  lastKeyTime = now;
+function updateScanDisplay() {
+  const box = document.getElementById('scanDisplayBox');
+  box.textContent = scanCharBuffer || 'اسكان أي كود دلوقتي...';
+  box.style.color = scanCharBuffer ? '#f1f5f9' : '#64748b';
+}
 
+function scheduleAutoSubmit() {
   if (scanAutoSubmitTimer) clearTimeout(scanAutoSubmitTimer);
-  const val = e.target.value;
-  if (!val.trim()) { keyIntervals = []; return; }
+  if (!scanCharBuffer.trim()) { keyIntervals = []; return; }
 
   // متوسط الفاصل الزمني بين آخر 5 حروف - لو صغير جدًا (أقل من 30 مللي ثانية) يبقى سكانر
   const recentIntervals = keyIntervals.slice(-5);
@@ -453,11 +451,49 @@ document.getElementById('unifiedScanInput').addEventListener('input', (e) => {
   const looksLikeScanner = avgInterval < 30;
   const delay = looksLikeScanner ? 120 : 900;
 
+  const valAtSchedule = scanCharBuffer;
   scanAutoSubmitTimer = setTimeout(() => {
     keyIntervals = [];
     lastKeyTime = 0;
-    handleScan(val);
+    if (scanCharBuffer === valAtSchedule) handleScan(valAtSchedule);
   }, delay);
+}
+
+document.addEventListener('keydown', (e) => {
+  if (manualModeActive) return; // وضع الكتابة اليدوية بيستخدم حقل حقيقي منفصل
+  const tag = (e.target.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'select' || tag === 'textarea') return; // مايتدخلش لو المستخدم فاعل عنصر تاني (زي اختيار المحطة)
+  if (!currentStation) return;
+
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    if (scanAutoSubmitTimer) { clearTimeout(scanAutoSubmitTimer); scanAutoSubmitTimer = null; }
+    if (scanCharBuffer.trim()) handleScan(scanCharBuffer);
+    return;
+  }
+  if (e.key === 'Backspace') {
+    e.preventDefault();
+    scanCharBuffer = scanCharBuffer.slice(0, -1);
+    updateScanDisplay();
+    return;
+  }
+  if (e.key.length === 1) { // حرف/رقم حقيقي بس - بنتجاهل Shift, Tab, Ctrl، إلخ
+    const now = Date.now();
+    if (lastKeyTime) keyIntervals.push(now - lastKeyTime);
+    lastKeyTime = now;
+    scanCharBuffer += e.key;
+    updateScanDisplay();
+    scheduleAutoSubmit();
+  }
+});
+
+// وضع الكتابة اليدوية: بيفتح حقل نص حقيقي مؤقتًا (الكيبورد هيظهر عن قصد هنا بس)
+document.getElementById('unifiedScanInput').addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    handleScan(e.target.value);
+    exitManualMode();
+  }
 });
 
 // =========================================================
@@ -673,6 +709,40 @@ async function invalidateRefRowsCache(stationId) {
 }
 
 let comparisonInProgress = false;
+
+// زرار "كتابة يدوية" - بيفتح حقل نص حقيقي (ظاهر) عشان الكيبورد يظهر عن قصد
+// هنا بس، ولما يخلص بيرجع يقفل الحقل ويرجع لوضع السكانر العادي (اللي مبيفتحش كيبورد)
+function enterManualMode() {
+  manualModeActive = true;
+  const input = document.getElementById('unifiedScanInput');
+  const box = document.getElementById('scanDisplayBox');
+  const btn = document.getElementById('toggleKeyboardBtn');
+  input.style.cssText = 'flex:1; padding:12px 14px; border-radius:8px; background:#334155; color:#f1f5f9; font-size:15px; border:none;';
+  input.placeholder = 'اكتب الكود واضغط Enter';
+  box.style.display = 'none';
+  btn.textContent = '📷 وضع السكانر';
+  btn.style.background = '#3b82f6';
+  input.value = '';
+  input.focus();
+}
+
+function exitManualMode() {
+  manualModeActive = false;
+  const input = document.getElementById('unifiedScanInput');
+  const box = document.getElementById('scanDisplayBox');
+  const btn = document.getElementById('toggleKeyboardBtn');
+  input.style.cssText = 'position:absolute; width:1px; height:1px; opacity:0; pointer-events:none;';
+  input.value = '';
+  input.blur();
+  box.style.display = 'block';
+  btn.textContent = '⌨️ كتابة يدوية';
+  btn.style.background = '#334155';
+}
+
+document.getElementById('toggleKeyboardBtn').addEventListener('click', () => {
+  if (manualModeActive) exitManualMode();
+  else enterManualMode();
+});
 let resultAutoCloseTimer = null; // لإغلاق نتيجة OK تلقائيًا من غير انتظار ضغطة زرار
 async function runComparison() {
   if (comparisonInProgress) return;
