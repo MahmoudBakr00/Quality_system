@@ -642,8 +642,9 @@ async function loadStationsList() {
 }
 
 function renderConditionRow(c) {
+  const otherStations = allStationsCache.filter(s => s.id !== c.station_id);
   return `
-    <div class="condition-row" data-condition-id="${c.id}">
+    <div class="condition-row" data-condition-id="${c.id}" data-station-id="${c.station_id}">
       <input type="text" class="cond-name" value="${c.name}" placeholder="اسم الشرط" />
       <input type="text" class="cond-extract" value="${c.extract_start ? c.extract_start + '-' + c.extract_end : ''}" placeholder="مدى الاستخراج مثل 4-11" />
       <select class="cond-type" onchange="toggleCondDuplicateCb(this)">
@@ -652,9 +653,18 @@ function renderConditionRow(c) {
         <option value="save" ${c.comparison_type === 'save' ? 'selected' : ''}>💾 حفظ (تسجيل كل قيمة تتسكان)</option>
       </select>
       <input type="number" class="cond-peer" value="${c.peer_condition_order || ''}" placeholder="رقم الشرط (لو مباشرة)" min="1" />
-      <label style="display:${c.comparison_type !== 'peer' ? 'flex' : 'none'}; align-items:center; gap:4px; font-size:11px; font-weight:normal; white-space:nowrap;" class="cond-duplicate-wrap">
-        <input type="checkbox" class="cond-duplicate" ${c.prevent_duplicate ? 'checked' : ''} /> 🚫 منع تكرار القيمة
-      </label>
+      <div class="cond-dup-verify-wrap" style="display:flex; flex-direction:column; gap:6px; font-size:11px; font-weight:normal;">
+        <label style="display:flex; align-items:center; gap:4px; white-space:nowrap;">
+          <input type="checkbox" class="cond-duplicate" ${c.prevent_duplicate ? 'checked' : ''} onchange="toggleCondMutualExclusive(this, 'duplicate')" /> 🚫 منع تكرار (بنفس المحطة)
+        </label>
+        <label style="display:flex; align-items:center; gap:4px; white-space:nowrap;">
+          <input type="checkbox" class="cond-verify" ${c.verify_station_id ? 'checked' : ''} onchange="toggleCondMutualExclusive(this, 'verify')" /> ✅ تحقق من محطة سابقة
+        </label>
+        <select class="cond-verify-station" style="display:${c.verify_station_id ? 'block' : 'none'};">
+          <option value="">-- اختر المحطة --</option>
+          ${otherStations.map(s => `<option value="${s.id}" ${c.verify_station_id === s.id ? 'selected' : ''}>${s.name}</option>`).join('')}
+        </select>
+      </div>
       <div style="display:flex; gap:4px;">
         <button class="small-btn" onclick="saveConditionRow('${c.id}')">💾</button>
         <button class="small-btn danger" onclick="deleteConditionRow('${c.id}')">🗑</button>
@@ -664,8 +674,23 @@ function renderConditionRow(c) {
 }
 
 function toggleCondDuplicateCb(selectEl) {
-  const wrap = selectEl.closest('.condition-row').querySelector('.cond-duplicate-wrap');
-  wrap.style.display = selectEl.value !== 'peer' ? 'flex' : 'none';
+  // اتاحت لكل الأنواع دلوقتي (بما فيهم "مقارنة بشرط تاني")
+}
+
+// منع تكرار وتحقق من محطة سابقة متبادلين - اختيار واحد بس يشتغل في نفس الوقت
+function toggleCondMutualExclusive(checkboxEl, which) {
+  const row = checkboxEl.closest('.condition-row');
+  const dupCb = row.querySelector('.cond-duplicate');
+  const verifyCb = row.querySelector('.cond-verify');
+  const verifySelect = row.querySelector('.cond-verify-station');
+
+  if (which === 'duplicate' && checkboxEl.checked) {
+    verifyCb.checked = false;
+    verifySelect.style.display = 'none';
+  } else if (which === 'verify') {
+    if (checkboxEl.checked) dupCb.checked = false;
+    verifySelect.style.display = checkboxEl.checked ? 'block' : 'none';
+  }
 }
 
 async function addConditionRow(stationId) {
@@ -687,6 +712,8 @@ async function saveConditionRow(conditionId) {
   const type = row.querySelector('.cond-type').value;
   const peerOrder = row.querySelector('.cond-peer').value.trim();
   const preventDuplicate = row.querySelector('.cond-duplicate').checked;
+  const verifyEnabled = row.querySelector('.cond-verify').checked;
+  const verifyStationId = row.querySelector('.cond-verify-station').value;
 
   let extractStart = null, extractEnd = null;
   if (extractRaw.includes('-')) {
@@ -696,11 +723,13 @@ async function saveConditionRow(conditionId) {
 
   if (!name) { alert('⚠️ اكتب اسم الشرط'); return; }
   if (type === 'peer' && !peerOrder) { alert('⚠️ حدد رقم الشرط اللي هيتقارن بيه'); return; }
+  if (verifyEnabled && !verifyStationId) { alert('⚠️ اختار المحطة اللي عايز تتحقق منها'); return; }
 
   const { error } = await sbClient.from('comparison_conditions').update({
     name, extract_start: extractStart, extract_end: extractEnd,
     comparison_type: type, peer_condition_order: type === 'peer' ? parseInt(peerOrder, 10) : null,
-    prevent_duplicate: type !== 'peer' ? preventDuplicate : false,
+    prevent_duplicate: preventDuplicate,
+    verify_station_id: verifyEnabled ? verifyStationId : null,
   }).eq('id', conditionId);
 
   if (error) { alert('❌ ' + error.message); return; }
@@ -937,13 +966,17 @@ function renderScanWizard(stationId) {
       <h4>📷 معالج الإعداد بالسكان — أضف كل شرط بقيمته المرجعية (من نفس الوحدة الفعلية)</h4>
       <div class="wizard-cond-chips" id="wizardChips-${stationId}">
         ${items.length === 0 ? '<span style="color:#64748b; font-size:12px;">لسه معملتش أي شرط في الجلسة دي</span>' :
-          items.map((it, idx) => `
+          items.map((it, idx) => {
+            const extraFlag = it.preventDuplicate ? ' 🚫منع تكرار' : it.verifyStationId ? ' ✅تحقق محطة' : '';
+            const base = it.type === 'save' ? '💾' : it.type === 'peer' ? `🔗← شرط #${it.peerOrder}` : `= "${it.value}"`;
+            return `
             <span class="wizard-cond-chip">
               ${idx + 1}. ${it.name} ${it.extract_start ? `(${it.extract_start}-${it.extract_end})` : ''}
-              ${it.type === 'save' ? `💾${it.preventDuplicate ? ' 🚫منع تكرار' : ''}` : it.type === 'peer' ? `🔗← شرط #${it.peerOrder}` : `= "${it.value}"${it.preventDuplicate ? ' 🚫منع تكرار' : ''}`}
+              ${base}${extraFlag}
               <button onclick="removeWizardCondition('${stationId}', ${idx})">✕</button>
             </span>
-          `).join('')}
+          `;
+          }).join('')}
       </div>
 
       <label>اسم الشرط</label>
@@ -965,9 +998,18 @@ function renderScanWizard(stationId) {
         <input type="number" id="wzPeerOrder-${stationId}" placeholder="رقم الشرط اللي عايز تقارن بيه (مثال: 1)" min="1" />
       </div>
 
-      <label style="display:none; align-items:center; gap:6px; font-weight:normal; margin-top:8px;" id="wzDuplicateWrap-${stationId}">
-        <input type="checkbox" id="wzDuplicate-${stationId}" /> 🚫 منع تكرار القيمة (لو اتسكانت قبل كده، هيظهر خطأ "مكرر")
-      </label>
+      <div style="display:flex; flex-direction:column; gap:6px; margin-top:8px; font-size:12px;">
+        <label style="display:flex; align-items:center; gap:6px; font-weight:normal;">
+          <input type="checkbox" id="wzDuplicate-${stationId}" onchange="toggleWizardDupVerify('${stationId}', 'duplicate')" /> 🚫 منع تكرار (بنفس المحطة)
+        </label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:normal;">
+          <input type="checkbox" id="wzVerify-${stationId}" onchange="toggleWizardDupVerify('${stationId}', 'verify')" /> ✅ تحقق من محطة سابقة
+        </label>
+        <select id="wzVerifyStation-${stationId}" style="display:none;">
+          <option value="">-- اختر المحطة --</option>
+          ${allStationsCache.filter(s => s.id !== stationId).map(s => `<option value="${s.id}">${s.name}</option>`).join('')}
+        </select>
+      </div>
 
       <label style="margin-top:10px;" id="wzValueLabel-${stationId}">القيمة المرجعية (اسكانها من الوحدة الفعلية أو اكتبها يدويًا)</label>
       <div class="wizard-scan-row" id="wzValueRow-${stationId}">
@@ -988,7 +1030,6 @@ function renderScanWizard(stationId) {
 function toggleWizardExtract(stationId) {
   const type = document.querySelector(`input[name="wzType-${stationId}"]:checked`).value;
   document.getElementById(`wzExtractRow-${stationId}`).classList.toggle('show', type === 'extract');
-  document.getElementById(`wzDuplicateWrap-${stationId}`).style.display = type !== 'peer' ? 'flex' : 'none';
   document.getElementById(`wzPeerRow-${stationId}`).style.display = type === 'peer' ? 'block' : 'none';
   document.getElementById(`wzValueRow-${stationId}`).style.display = type === 'peer' ? 'none' : 'flex';
   document.getElementById(`wzValueLabel-${stationId}`).style.display = type === 'peer' ? 'none' : 'block';
@@ -996,6 +1037,21 @@ function toggleWizardExtract(stationId) {
     ? 'قيمة أولى (اختياري - ممكن تسيبها فاضية وتبدأ التسجيل من أول سكان فعلي على الخط)'
     : 'القيمة المرجعية (اسكانها من الوحدة الفعلية أو اكتبها يدويًا)';
   updateWizardPreview(stationId);
+}
+
+// منع تكرار وتحقق من محطة سابقة متبادلين
+function toggleWizardDupVerify(stationId, which) {
+  const dupCb = document.getElementById(`wzDuplicate-${stationId}`);
+  const verifyCb = document.getElementById(`wzVerify-${stationId}`);
+  const verifySelect = document.getElementById(`wzVerifyStation-${stationId}`);
+
+  if (which === 'duplicate' && dupCb.checked) {
+    verifyCb.checked = false;
+    verifySelect.style.display = 'none';
+  } else if (which === 'verify') {
+    if (verifyCb.checked) dupCb.checked = false;
+    verifySelect.style.display = verifyCb.checked ? 'block' : 'none';
+  }
 }
 
 function updateWizardPreview(stationId) {
@@ -1020,14 +1076,20 @@ function addWizardCondition(stationId) {
   const name = document.getElementById(`wzName-${stationId}`).value.trim();
   const type = document.querySelector(`input[name="wzType-${stationId}"]:checked`).value;
   const rawValue = document.getElementById(`wzValue-${stationId}`).value.trim();
-  const preventDuplicate = type !== 'peer' ? document.getElementById(`wzDuplicate-${stationId}`).checked : false;
+  const preventDuplicate = document.getElementById(`wzDuplicate-${stationId}`).checked;
+  const verifyEnabled = document.getElementById(`wzVerify-${stationId}`).checked;
+  const verifyStationId = document.getElementById(`wzVerifyStation-${stationId}`).value;
 
   if (!name) { alert('⚠️ اكتب اسم الشرط'); return; }
+  if (verifyEnabled && !verifyStationId) { alert('⚠️ اختار المحطة اللي عايز تتحقق منها'); return; }
 
   if (type === 'peer') {
     const peerOrder = parseInt(document.getElementById(`wzPeerOrder-${stationId}`).value, 10);
     if (!peerOrder) { alert('⚠️ اكتب رقم الشرط اللي عايز تقارن بيه'); return; }
-    scanWizardState[stationId].push({ name, type: 'peer', extract_start: null, extract_end: null, value: null, preventDuplicate: false, peerOrder });
+    scanWizardState[stationId].push({
+      name, type: 'peer', extract_start: null, extract_end: null, value: null, peerOrder,
+      preventDuplicate, verifyStationId: verifyEnabled ? verifyStationId : null
+    });
     renderScanWizard(stationId);
     return;
   }
@@ -1047,7 +1109,7 @@ function addWizardCondition(stationId) {
     name,
     type: type === 'save' ? 'save' : 'database',
     extract_start: extractStart, extract_end: extractEnd,
-    value, preventDuplicate
+    value, preventDuplicate, verifyStationId: verifyEnabled ? verifyStationId : null
   });
   renderScanWizard(stationId);
 }
@@ -1068,7 +1130,8 @@ async function finishScanWizard(stationId) {
       extract_start: it.extract_start, extract_end: it.extract_end,
       comparison_type: it.type === 'save' ? 'save' : it.type === 'peer' ? 'peer' : 'database',
       peer_condition_order: it.type === 'peer' ? it.peerOrder : null,
-      prevent_duplicate: it.type !== 'peer' ? !!it.preventDuplicate : false,
+      prevent_duplicate: !!it.preventDuplicate,
+      verify_station_id: it.verifyStationId || null,
     }));
 
     const { data: insertedConditions, error: condErr } = await sbClient
