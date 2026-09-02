@@ -308,6 +308,13 @@ async function preloadAllReferenceData(stations) {
       console.warn('فشل تحميل القيم المرجعية لمحطة ' + s.name, err);
       refRowsCacheMap[s.id] = [];
     }
+    try {
+      const { data } = await sbClient.from('comparison_duplicate_log').select('order_index, value').eq('station_id', s.id);
+      dupLogCacheMap[s.id] = new Set((data || []).map(r => r.order_index + '::' + r.value));
+    } catch (err) {
+      console.warn('فشل تحميل سجل منع التكرار لمحطة ' + s.name, err);
+      dupLogCacheMap[s.id] = new Set();
+    }
   }));
 
   if (label) {
@@ -315,6 +322,19 @@ async function preloadAllReferenceData(stations) {
     label.textContent = `📊 تم تحميل ${total} قيمة مرجعية إجمالاً (${stations.length} محطة) — جاهز للسكان الفوري`;
   }
   updateStationRefCountLabel();
+}
+
+// كاش سجل "منع التكرار" لكل محطة - مفتاح كل قيمة هو "رقم الشرط::القيمة"
+let dupLogCacheMap = {}; // stationId -> Set
+function isDuplicateInLog(stationId, orderIndex, value) {
+  const set = dupLogCacheMap[stationId];
+  return !!(set && set.has(orderIndex + '::' + value));
+}
+function registerDuplicateLog(stationId, orderIndex, value) {
+  if (!dupLogCacheMap[stationId]) dupLogCacheMap[stationId] = new Set();
+  dupLogCacheMap[stationId].add(orderIndex + '::' + value);
+  sbClient.from('comparison_duplicate_log').insert([{ station_id: stationId, order_index: orderIndex, value: String(value) }])
+    .then(({ error }) => { if (error && error.code !== '23505') console.warn('فشل تسجيل منع التكرار:', error); });
 }
 
 // =========================================================
@@ -682,16 +702,31 @@ async function runComparison() {
       } else if (condition.comparison_type === 'database') {
         const result = findDbMatch(condition, attempts, false);
         if (result && claimedBy[result.attempt.idx] === condition.order_index) {
-          match = true;
           matchedValue = result.attempt.value;
           expectedValue = result.found.expected_values[condition.order_index];
+
+          const isDup = condition.prevent_duplicate && isDuplicateInLog(stationId, condition.order_index, matchedValue);
+          if (isDup) {
+            match = false;
+            hasDuplicate = true;
+            detail = 'القيمة دي اتسكانت قبل كده (مكررة)';
+            overallResult = 'ng';
+            mismatchDetails.push(`${condition.name}: "${matchedValue}" مكررة`);
+          } else {
+            match = true;
+            detail = 'موجود في قاعدة البيانات';
+            if (condition.prevent_duplicate) {
+              registerDuplicateLog(stationId, condition.order_index, matchedValue);
+            }
+          }
         } else {
           // فشل: نفضّل نوري كود مش متاخد لشرط تاني بالفعل، عشان النتيجة تكون واضحة ومفيدة
           const unclaimed = attempts.find(a => a.value && claimedBy[a.idx] === null);
           matchedValue = (unclaimed || attempts.find(a => a.value) || {}).value || null;
+          detail = 'غير موجود في القاعدة المرجعية';
+          overallResult = 'ng';
+          mismatchDetails.push(`${condition.name}: ${matchedValue || 'N/A'} غير موجود في DB`);
         }
-        detail = match ? 'موجود في قاعدة البيانات' : 'غير موجود في القاعدة المرجعية';
-        if (!match) { overallResult = 'ng'; mismatchDetails.push(`${condition.name}: ${matchedValue || 'N/A'} غير موجود في DB`); }
 
       } else if (condition.comparison_type === 'save') {
         const chosen = attempts.find(a => a.value && claimedBy[a.idx] === null) || attempts.find(a => a.value);
@@ -838,15 +873,10 @@ function showResult(result, conditionResults, codes, defectFlag, hasDuplicate) {
 
   if ((displayState === 'ng' || displayState === 'duplicate') && failedConditions.length > 0) {
     detailHtml += failedConditions.map(cr => {
-      const reason = cr.comparison_type === 'peer'
-        ? 'مش متطابق مع الشرط المرتبط بيه'
-        : cr.comparison_type === 'save'
-        ? 'مسجلة قبل كده (مكررة)'
-        : 'مش موجودة في القاعدة المرجعية';
       return `
         <div class="detail-row">
           <span class="detail-label">${cr.condition_name}:</span>
-          <span class="detail-value mismatch" style="direction:ltr;">"${cr.extracted_value || 'N/A'}" ${reason}</span>
+          <span class="detail-value mismatch" style="direction:ltr;">"${cr.extracted_value || 'N/A'}" ${cr.detail}</span>
         </div>
       `;
     }).join('');
