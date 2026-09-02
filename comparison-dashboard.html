@@ -1227,7 +1227,16 @@ async function saveRegisteredValue(stationId) {
   if (error) { alert('❌ فشل الحفظ: ' + error.message); return; }
   alert('✅ تم تسجيل القيمة الجديدة بنجاح');
   document.getElementById(`registerArea-${stationId}`).innerHTML = '';
-  loadStationsList();
+
+  // لو شاشة "عرض القيم المسجلة" كانت مفتوحة، حدّثها فورًا بدل ما تتقفل وتحتاج
+  // فتح تاني يدوي عشان تشوف القيمة الجديدة
+  const refView = document.getElementById(`refDataView-${stationId}`);
+  if (refView && refView.style.display === 'block') {
+    await toggleReferenceDataView(stationId); // يقفل
+    await toggleReferenceDataView(stationId); // يفتح تاني بالبيانات المحدثة
+  } else {
+    loadStationsList();
+  }
 }
 
 // =========================================================
