@@ -401,6 +401,9 @@ document.getElementById('finishScanNowBtn').addEventListener('click', () => {
 async function handleScan(rawValue) {
   const value = (rawValue || '').trim();
   if (!value) return;
+  if (scanAutoSubmitTimer) { clearTimeout(scanAutoSubmitTimer); scanAutoSubmitTimer = null; }
+  keyIntervals = [];
+  lastKeyTime = 0;
 
   if (!currentStation) { alert('⚠️ اختر محطة الفحص أولاً'); return; }
 
@@ -419,8 +422,42 @@ async function handleScan(rawValue) {
 document.getElementById('unifiedScanInput').addEventListener('keypress', (e) => {
   if (e.key === 'Enter') {
     e.preventDefault();
+    if (scanAutoSubmitTimer) { clearTimeout(scanAutoSubmitTimer); scanAutoSubmitTimer = null; }
     handleScan(e.target.value);
   }
+});
+
+// =========================================================
+// سكان من غير الحاجة لـ Enter: سكانرات الباركود اليدوية/الـPDA بتحقن
+// الحروف بسرعة جدًا (فاصل زمني صغير جدًا بين كل حرف والتاني) - بنكتشف
+// النمط ده تلقائيًا ونعمل submit بسرعة بعد ما السكان يخلص. لو الكتابة
+// بطيئة (يدوي بإيد الفني)، بنستنى فترة أطول قبل ما نعمل submit تلقائي
+// عشان منقطعش عليه وهو لسه بيكتب
+// =========================================================
+let scanAutoSubmitTimer = null;
+let lastKeyTime = 0;
+let keyIntervals = [];
+
+document.getElementById('unifiedScanInput').addEventListener('input', (e) => {
+  const now = Date.now();
+  if (lastKeyTime) keyIntervals.push(now - lastKeyTime);
+  lastKeyTime = now;
+
+  if (scanAutoSubmitTimer) clearTimeout(scanAutoSubmitTimer);
+  const val = e.target.value;
+  if (!val.trim()) { keyIntervals = []; return; }
+
+  // متوسط الفاصل الزمني بين آخر 5 حروف - لو صغير جدًا (أقل من 30 مللي ثانية) يبقى سكانر
+  const recentIntervals = keyIntervals.slice(-5);
+  const avgInterval = recentIntervals.length > 0 ? recentIntervals.reduce((a, b) => a + b, 0) / recentIntervals.length : 999;
+  const looksLikeScanner = avgInterval < 30;
+  const delay = looksLikeScanner ? 120 : 900;
+
+  scanAutoSubmitTimer = setTimeout(() => {
+    keyIntervals = [];
+    lastKeyTime = 0;
+    handleScan(val);
+  }, delay);
 });
 
 // =========================================================
@@ -710,18 +747,19 @@ async function runComparison() {
       let detail = '';
 
       if (condition.comparison_type === 'peer') {
-        const peerCondition = currentConditions.find(c => c.order_index === condition.peer_condition_order);
+        // مقارنة بشرط تاني = مقارنة الكود الكامل بالكود الكامل دايمًا (مش جزء مستخرج خالص)
         let matchedIdx = null;
         outer:
         for (let i1 = 0; i1 < codes.length; i1++) {
-          const v1 = condition.extract_start ? extractSubstring(codes[i1], condition.extract_start, condition.extract_end) : codes[i1];
+          const v1 = codes[i1];
           if (!v1) continue;
-          for (const code2 of codes) {
-            const v2 = peerCondition && peerCondition.extract_start ? extractSubstring(code2, peerCondition.extract_start, peerCondition.extract_end) : code2;
+          for (let i2 = 0; i2 < codes.length; i2++) {
+            if (i2 === i1) continue;
+            const v2 = codes[i2];
             if (v2 && v1 === v2) { match = true; matchedValue = v1; expectedValue = v2; matchedIdx = i1; break outer; }
           }
         }
-        if (!match) matchedValue = (attempts.find(a => a.value && claimedBy[a.idx] === null) || attempts.find(a => a.value) || {}).value || null;
+        if (!match) matchedValue = (attempts.find(a => a.value && claimedBy[a.idx] === null) || attempts.find(a => a.value) || {}).value || codes[0] || null;
         detail = match ? 'مطابق' : 'لم يتم إيجاد تطابق بين الأكواد المسكونة';
         if (!match) { overallResult = 'ng'; mismatchDetails.push(`${condition.name}: عدم تطابق`); }
 
